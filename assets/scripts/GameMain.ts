@@ -215,40 +215,29 @@ export class GameMain extends Component {
     private genMap(): MapNode[][] {
         const pool: NodeKind[] = ['battle', 'battle', 'battle', 'battle',
             'elite', 'elite', 'treasure', 'event', 'rest'];
+        const pick = () => pool[Math.floor(Math.random() * pool.length)];
+        // 三条路线：各自独立的槽位走廊（互不重叠），行间默认只沿本线前进
+        const LANES: number[][] = [[0, 0.5], [1.5, 2], [2.5, 3]];
         const map: MapNode[][] = [];
         for (let r = 0; r < 7; r++) {
-            const count = r === 0 ? 3 : (Math.random() < 0.45 ? 2 : 3);
-            const slots = [0, 1, 2, 3];
-            for (let i = slots.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                const t = slots[i]; slots[i] = slots[j]; slots[j] = t;
+            map.push(LANES.map((slots) => ({
+                kind: pick(),
+                slot: slots[Math.floor(Math.random() * slots.length)],
+                links: [],
+                done: false,
+            })));
+        }
+        for (let r = 0; r < map.length - 1; r++) {
+            for (let l = 0; l < LANES.length; l++) { map[r][l].links.push(l); }
+            // 少数岔口允许换到相邻路线
+            if (Math.random() < 0.2) {
+                const a = Math.floor(Math.random() * (LANES.length - 1));
+                const from = Math.random() < 0.5 ? a : a + 1;
+                map[r][from].links.push(from === a ? a + 1 : a);
             }
-            const row: MapNode[] = slots.slice(0, count).sort((a, b) => a - b)
-                .map((s) => ({ kind: pool[Math.floor(Math.random() * pool.length)], slot: s, links: [], done: false }));
-            map.push(row);
         }
         map.push([{ kind: 'boss', slot: 1.5, links: [], done: false }]);
-        for (let r = 0; r < map.length - 1; r++) {
-            const cur = map[r], nxt = map[r + 1];
-            for (let i = 0; i < cur.length; i++) {
-                const sorted = nxt.map((n, j) => ({ j, d: Math.abs(n.slot - cur[i].slot) })).sort((a, b) => a.d - b.d);
-                const take = Math.min(nxt.length, Math.random() < 0.5 ? 1 : 2);
-                for (let k = 0; k < take; k++) {
-                    if (cur[i].links.indexOf(sorted[k].j) < 0) { cur[i].links.push(sorted[k].j); }
-                }
-                if (cur[i].links.length === 0) { cur[i].links.push(sorted[0].j); }
-            }
-            for (let j = 0; j < nxt.length; j++) {
-                if (!cur.some((n) => n.links.indexOf(j) >= 0)) {
-                    let best = 0, bd = 1e9;
-                    for (let i = 0; i < cur.length; i++) {
-                        const d = Math.abs(cur[i].slot - nxt[j].slot);
-                        if (d < bd) { bd = d; best = i; }
-                    }
-                    cur[best].links.push(j);
-                }
-            }
-        }
+        for (let l = 0; l < LANES.length; l++) { map[6][l].links.push(0); }
         return map;
     }
 
