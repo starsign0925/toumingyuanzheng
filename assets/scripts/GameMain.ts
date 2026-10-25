@@ -193,12 +193,20 @@ export class GameMain extends Component {
             if (left > 0) { return; }
             this.trial[heroId] = true;
             this.pick = heroId;
+            this.unschedule(tick);
             ov.node.destroy();
+            const ro = this.node.getChildByName('recruitOv');
+            if (ro && ro.isValid) { ro.destroy(); }
             this.showHome();
         });
         setBtnEnabled(closeB, false, 200, 54);
-        mkButton(ov.node, '算了', 120, 44, 0, -300, 15, () => ov.node.destroy());
+        mkButton(ov.node, '算了', 120, 44, 0, -300, 15, () => {
+            this.unschedule(tick);
+            ov.node.destroy();
+            this.onRecruit(); // 返回招募列表
+        });
         const tick = () => {
+            if (!dn.isValid) { this.unschedule(tick); return; }
             left--;
             drawDie(dg, 84, { value: 1 + Math.floor(Math.random() * 6) });
             dn.angle = (Math.random() - 0.5) * 40;
@@ -218,7 +226,10 @@ export class GameMain extends Component {
     private onRecruit() {
         const pool = HEROES.filter((h) => this.save.owned.indexOf(h.id) < 0);
         if (pool.length === 0) { this.mapMsg = '全员已集结'; this.showHome(); return; }
+        const stale = this.node.getChildByName('recruitOv');
+        if (stale && stale.isValid) { stale.destroy(); }
         const ov = mkPanel(this.node, 560, 720, 0, 0, COL.panelLight, 12, COL.gold, 3);
+        ov.node.name = 'recruitOv';
         ov.node.on(Node.EventType.TOUCH_END, () => undefined); // 拦截穿透（不能用 BlockInputEvents，会拦截子按钮）
         popIn(ov.node, 0.35, 0.4, 1.1);
         mkLabel(ov.node, '招募英雄 · ' + RULES.recruitCost + ' 金币/位', 22, COL.gold, 0, 322);
@@ -569,7 +580,7 @@ export class GameMain extends Component {
         drawDie(dg, 150, { value: 1 });
         let phase = 0;
         const tick = () => {
-            if (phase !== 0) { return; }
+            if (phase !== 0 || !dn.isValid) { return; }
             drawDie(dg, 150, { value: 1 + Math.floor(Math.random() * 6) });
             dn.angle = (Math.random() - 0.5) * 30;
         };
