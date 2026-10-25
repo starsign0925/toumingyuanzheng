@@ -178,7 +178,7 @@ export class GameMain extends Component {
     /** 模拟广告：倒计时 5s 后解锁该英雄一次试玩（正式版换激励视频回调）。 */
     private showFakeAd(heroId: string) {
         const ov = mkPanel(this.node, 520, 680, 0, 0, COL.panelLight, 12, COL.gold, 3);
-        ov.node.addComponent(BlockInputEvents);
+        ov.node.on(Node.EventType.TOUCH_END, () => undefined); // 拦截穿透（不能用 BlockInputEvents，会拦截子按钮）
         popIn(ov.node, 0.35, 0.4, 1.1);
         mkLabel(ov.node, '广告 · 试玩 ' + heroById(heroId).name, 22, COL.gold, 0, 292);
         mkLabel(ov.node, '（正式版接入广告后播放激励视频）', 12, COL.dim, 0, 262);
@@ -219,7 +219,7 @@ export class GameMain extends Component {
         const pool = HEROES.filter((h) => this.save.owned.indexOf(h.id) < 0);
         if (pool.length === 0) { this.mapMsg = '全员已集结'; this.showHome(); return; }
         const ov = mkPanel(this.node, 560, 720, 0, 0, COL.panelLight, 12, COL.gold, 3);
-        ov.node.addComponent(BlockInputEvents);
+        ov.node.on(Node.EventType.TOUCH_END, () => undefined); // 拦截穿透（不能用 BlockInputEvents，会拦截子按钮）
         popIn(ov.node, 0.35, 0.4, 1.1);
         mkLabel(ov.node, '招募英雄 · ' + RULES.recruitCost + ' 金币/位', 22, COL.gold, 0, 322);
         mkLabel(ov.node, '现有金币 ' + this.save.gold, 14, COL.dim, 0, 294);
