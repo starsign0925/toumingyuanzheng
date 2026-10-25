@@ -1,11 +1,12 @@
 // 骰命远征 —— 入口组件（竖屏单人冒险）：营地 / 选人 / 地图 / 事件 / 宝箱 / 奖励 / 结算
-import { _decorator, Component, Node, Label, Graphics, sys, Color, tween, Vec3, UIOpacity } from 'cc';
+import { _decorator, Component, Node, Label, Graphics, sys, Color, tween, Vec3, UIOpacity, BlockInputEvents } from 'cc';
 import {
     HEROES, NORMAL_ENEMIES, ELITES, BOSS, EVENTS, RULES,
     NODE_NAME, heroById, COLUMN_X, makeHero, starterDeck, rewardOptions, cardById,
+    fateTier, fateBattleEntry, fateLines,
 } from './Data';
 import type {
-    HeroInst, EnemyDef, EventDef, NodeKind, MapNode, RunState, SaveData,
+    HeroInst, EnemyDef, EventDef, NodeKind, MapNode, RunState, SaveData, BattleEntry,
 } from './Data';
 import {
     COL, mkNode, mkLabel, mkPanel, mkButton, setBtnEnabled, drawPanel,
@@ -404,21 +405,73 @@ export class GameMain extends Component {
     private hpBar = null;
 
     private enterNode(kind: NodeKind) {
+        const roll = 1 + Math.floor(Math.random() * 6);
+        const tier = fateTier(roll);
+        this.rollOverlay('命运掷骰 · ' + NODE_NAME[kind], roll, fateLines(kind, tier), () => {
+            this.enterNodeContent(kind, tier);
+        });
+    }
+
+    private enterNodeContent(kind: NodeKind, tier: number) {
         switch (kind) {
             case 'battle':
-                this.startBattle(NORMAL_ENEMIES[Math.floor(Math.random() * NORMAL_ENEMIES.length)]);
+                this.startBattle(NORMAL_ENEMIES[Math.floor(Math.random() * NORMAL_ENEMIES.length)],
+                    fateBattleEntry(kind, tier));
                 break;
             case 'elite':
-                this.startBattle(ELITES[Math.floor(Math.random() * ELITES.length)]);
+                this.startBattle(ELITES[Math.floor(Math.random() * ELITES.length)],
+                    fateBattleEntry(kind, tier));
                 break;
-            case 'boss': this.startBattle(BOSS); break;
-            case 'treasure': this.showTreasure(); break;
-            case 'event': this.showEvent(EVENTS[Math.floor(Math.random() * EVENTS.length)]); break;
-            case 'rest': this.showRest(); break;
+            case 'boss': this.startBattle(BOSS, fateBattleEntry(kind, tier)); break;
+            case 'treasure': this.showTreasure(tier); break;
+            case 'event': this.showEvent(EVENTS[Math.floor(Math.random() * EVENTS.length)], tier); break;
+            case 'rest': this.showRest(tier); break;
         }
     }
 
-    private startBattle(enemy: EnemyDef) {
+    /** 掷骰演出浮层：骰子翻滚后停在目标点数，显示结果文案，点击继续。 */
+    private rollOverlay(title: string, roll: number, lines: string[], onDone: () => void) {
+        const ov = mkPanel(this.node, 720, 1280, 0, 0, new Color(14, 10, 8, 242), 0, null, 0);
+        ov.node.addComponent(BlockInputEvents);
+        const op = ov.node.addComponent(UIOpacity);
+        op.opacity = 0;
+        tween(op).to(0.25, { opacity: 255 }).start();
+        mkLabel(ov.node, title, 30, COL.gold, 0, 340);
+        const dn = mkNode(ov.node, 'fdie', 150, 150, 0, 80);
+        const dg = dn.addComponent(Graphics);
+        drawDie(dg, 150, { value: 1 });
+        let phase = 0;
+        const tick = () => {
+            if (phase !== 0) { return; }
+            drawDie(dg, 150, { value: 1 + Math.floor(Math.random() * 6) });
+            dn.angle = (Math.random() - 0.5) * 30;
+        };
+        const settle = () => {
+            if (phase !== 0) { return; }
+            phase = 1;
+            dn.angle = 0;
+            drawDie(dg, 150, { value: roll, sel: true });
+            popIn(dn, 0.3, 1.5, 1.12);
+            for (let i = 0; i < lines.length; i++) {
+                const l = mkLabel(ov.node, lines[i], i === 0 ? 24 : 16,
+                    i === 0 ? COL.gold : COL.text, 0, -50 - i * 36);
+                const lo = l.node.addComponent(UIOpacity);
+                lo.opacity = 0;
+                tween(lo).delay(0.15 + i * 0.1).to(0.25, { opacity: 255 }).start();
+            }
+            const hint = mkLabel(ov.node, '点 击 继 续', 14, COL.dim, 0, -280);
+            const ho = hint.node.addComponent(UIOpacity);
+            ho.opacity = 0;
+            tween(ho).delay(0.5).to(0.3, { opacity: 200 }).start();
+        };
+        this.schedule(tick, 0.09, 9);
+        this.scheduleOnce(settle, 0.95);
+        ov.node.on(Node.EventType.TOUCH_END, () => {
+            if (phase === 0) { settle(); } else { ov.node.destroy(); onDone(); }
+        });
+    }
+
+    private startBattle(enemy: EnemyDef, entry?: BattleEntry) {
         const root = this.clearScreen();
         const bn = mkNode(root, 'battle', 0, 0, 0, 0);
         const bs = bn.addComponent(BattleScreen);
@@ -437,9 +490,9 @@ export class GameMain extends Component {
             if (node.kind === 'boss') {
                 this.advance('胜利！');
             } else {
-                this.showReward(enemy.elite ? true : false, gold);
+                this.rewardRoll(enemy, gold);
             }
-        }, this.autoBattle);
+        }, this.autoBattle, entry);
     }
 
     private advance(msg: string) {
@@ -471,47 +524,67 @@ export class GameMain extends Component {
 
     // ---------------- 节点内容 ----------------
 
-    /** 胜利奖励：3 选 1 加牌（精英为稀有池），可跳过。 */
-    private showReward(rare: boolean, gold: number) {
+    /** 战后奖励掷骰：1-3 普通卡选 1 张 / 4-5 普通卡选 2 张 / 6 稀有卡池选 1 张（精英升一档）。 */
+    private rewardRoll(enemy: EnemyDef, gold: number) {
+        const roll = 1 + Math.floor(Math.random() * 6);
+        let tier = fateTier(roll);
+        if (enemy.elite && tier < 3) { tier += 1; }
+        const lines = [
+            tier === 3 ? '大吉！稀有卡池开启' : tier === 2 ? '好运！可挑选两张' : '普通战利品',
+            '+' + gold + ' 金币已入袋',
+        ];
+        this.rollOverlay('战利品掷骰', roll, lines, () => this.showRewardPick(tier, gold));
+    }
+
+    private showRewardPick(tier: number, gold: number) {
         const root = this.clearScreen();
+        const pickN = tier === 2 ? 2 : 1;
         mkLabel(root, '胜利！获得 ' + gold + ' 金币', 30, COL.gold, 0, 420);
-        mkLabel(root, '选择一张卡牌加入牌组（也可跳过）', 17, COL.dim, 0, 380);
-        this.cardPick(0, rewardOptions(this.run.hero.def.id, Math.random, rare), (pick) => {
-            if (pick) { this.run.deck.push(pick); }
-            this.advance('胜利！+' + gold + ' 金' + (pick ? '，获得「' + cardById(pick).name + '」' : ''));
+        mkLabel(root, '选择 ' + pickN + ' 张卡牌加入牌组（也可跳过）', 17, COL.dim, 0, 380);
+        this.cardPick(0, rewardOptions(this.run.hero.def.id, Math.random, tier === 3), pickN, (ids) => {
+            for (const id of ids) { this.run.deck.push(id); }
+            this.advance('胜利！+' + gold + ' 金' + (ids.length
+                ? '，获得 ' + ids.map((i) => '「' + cardById(i).name + '」').join('') : ''));
         });
     }
 
-    /** 3 选 1 卡牌界面。onPick(null)=跳过。 */
-    private cardPick(y0: number, options: string[], onPick: (id: string | null) => void) {
+    /** 选卡界面：从 options 中选 picks 张（已选的会变暗）。onPick(ids) 可能为空（跳过）。 */
+    private cardPick(y0: number, options: string[], picks: number, onPick: (ids: string[]) => void) {
         const root = this.node.children[this.node.children.length - 1];
         const gap = 170;
-        let picked = false;
+        const chosen: string[] = [];
+        let done = false;
         for (let i = 0; i < options.length; i++) {
             const def = cardById(options[i]);
             const v = mkCard(root, def, -gap + i * gap, y0 + 30, 150, 210);
             v.node.on(Node.EventType.TOUCH_END, () => {
-                if (picked) { return; }
-                picked = true;
+                if (done || chosen.indexOf(options[i]) >= 0) { return; }
+                chosen.push(options[i]);
+                v.node.addComponent(UIOpacity).opacity = 110;
                 popIn(v.node, 0.15, 0.9, 1.05);
-                this.scheduleOnce(() => onPick(options[i]), 0.15);
+                if (chosen.length >= picks) {
+                    done = true;
+                    this.scheduleOnce(() => onPick(chosen.slice()), 0.3);
+                }
             });
         }
         mkButton(root, '跳过', 180, 52, 0, y0 - 170, 18, () => {
-            if (picked) { return; }
-            picked = true;
-            onPick(null);
+            if (done) { return; }
+            done = true;
+            onPick(chosen.slice());
         });
     }
 
-    private showTreasure() {
+    private showTreasure(tier: number) {
         const root = this.clearScreen();
         mkLabel(root, '神秘宝箱', 30, COL.gold, 0, 380);
         mkLabel(root, '箱盖刻满骰纹，里面传来清脆的碰撞声。', 16, COL.text, 0, 340, 600);
+        const goldAmt = tier === 3 ? 150 : tier === 2 ? 100 : 60;
+        const healPct = tier === 3 ? 0.5 : tier === 2 ? 0.35 : 0.2;
         const opts: { label: string; apply: () => void }[] = [
-            { label: '拿走金币（+60）', apply: () => this.advance('开箱获得 60 金币') },
+            { label: '拿走金币（+' + goldAmt + '）', apply: () => { this.run.gold += goldAmt; this.advance('开箱获得 ' + goldAmt + ' 金币'); } },
             { label: '翻找珍奇（获得一张稀有卡）', apply: () => this.showCardReward() },
-            { label: '供奉骰运（恢复 20% 生命）', apply: () => { this.healPct(0.2); this.advance('获得祝福，恢复了生命'); } },
+            { label: '供奉骰运（恢复 ' + Math.round(healPct * 100) + '% 生命）', apply: () => { this.healPct(healPct); this.advance('获得祝福，恢复了生命'); } },
         ];
         for (let i = 0; i < opts.length; i++) {
             mkButton(root, opts[i].label, 380, 56, 0, 200 - i * 76, 18, opts[i].apply);
@@ -522,9 +595,10 @@ export class GameMain extends Component {
         const root = this.clearScreen();
         mkLabel(root, '珍奇卡牌', 30, COL.gold, 0, 420);
         mkLabel(root, '选择一张加入牌组', 17, COL.dim, 0, 380);
-        this.cardPick(0, rewardOptions(this.run.hero.def.id, Math.random, true), (pick) => {
-            if (pick) { this.run.deck.push(pick); }
-            this.advance(pick ? '获得「' + cardById(pick).name + '」' : '空手而返');
+        this.cardPick(0, rewardOptions(this.run.hero.def.id, Math.random, true), 1, (ids) => {
+            const id = ids[0];
+            if (id) { this.run.deck.push(id); }
+            this.advance(id ? '获得「' + cardById(id).name + '」' : '空手而返');
         });
     }
 
@@ -533,26 +607,33 @@ export class GameMain extends Component {
         if (h.hp > 0) { h.hp = Math.min(h.maxHp, h.hp + h.maxHp * pct); }
     }
 
-    private showEvent(ev: EventDef) {
+    private showEvent(ev: EventDef, tier: number) {
         const root = this.clearScreen();
         mkLabel(root, ev.title, 28, COL.gold, 0, 400);
         mkLabel(root, ev.text, 16, COL.text, 0, 350, 600);
+        const mult = tier === 3 ? 2 : tier === 2 ? 1.5 : 1;
+        const rareCost = Math.round(30 / mult);
         for (let i = 0; i < ev.options.length; i++) {
             const opt = ev.options[i];
-            const canPay = !(opt.apply === 'buyrare' && this.run.gold < 30);
-            const ob = mkButton(root, opt.label, 480, 60, 0, 240 - i * 80, 17, () => {
+            const canPay = !(opt.apply === 'buyrare' && this.run.gold < rareCost);
+            const label = tier > 1
+                ? opt.apply === 'buyrare' ? '投入 ' + rareCost + ' 金币（获得一张稀有卡）'
+                    : opt.apply === 'gold45' ? '拾取星屑（+' + Math.round(45 * mult) + ' 金币）'
+                        : opt.label
+                : opt.label;
+            const ob = mkButton(root, label, 480, 60, 0, 240 - i * 80, 17, () => {
                 if (!canPay) { return; }
                 switch (opt.apply) {
-                    case 'gold45': this.run.gold += 45; this.advance('拾得 45 金币'); break;
-                    case 'heal25': this.healPct(0.25); this.advance('星光抚平了伤口'); break;
-                    case 'heal20': this.healPct(0.2); this.advance('井水沁人心脾'); break;
+                    case 'gold45': this.run.gold += Math.round(45 * mult); this.advance('拾得 ' + Math.round(45 * mult) + ' 金币'); break;
+                    case 'heal25': this.healPct(0.25 * mult); this.advance('星光抚平了伤口'); break;
+                    case 'heal20': this.healPct(0.2 * mult); this.advance('井水沁人心脾'); break;
                     case 'blooddie':
-                        this.run.hero.hp = Math.max(1, this.run.hero.hp - this.run.hero.maxHp * 0.15);
+                        this.run.hero.hp = Math.max(1, this.run.hero.hp - this.run.hero.maxHp * 0.15 / mult);
                         this.run.buffs.extraDie++;
                         this.advance('以血换运：每回合 +1 骰子');
                         break;
                     case 'buyrare':
-                        this.run.gold -= 30;
+                        this.run.gold -= rareCost;
                         this.showCardReward();
                         break;
                     default: this.advance('悄然离开');
@@ -562,15 +643,20 @@ export class GameMain extends Component {
         }
     }
 
-    private showRest() {
+    private showRest(tier: number) {
         const root = this.clearScreen();
         mkLabel(root, '营火', 30, COL.gold, 0, 400);
         mkLabel(root, '火光摇曳，骰子在掌心温热。', 16, COL.text, 0, 350);
-        mkButton(root, '休息（恢复 ' + Math.round(RULES.restHealPct * 100) + '% 生命）', 380, 60, 0, 240, 18, () => {
-            this.healPct(RULES.restHealPct);
+        const heal = tier === 3 ? 0.6 : tier === 2 ? 0.45 : RULES.restHealPct;
+        mkButton(root, '休息（恢复 ' + Math.round(heal * 100) + '% 生命）', 380, 60, 0, 240, 18, () => {
+            this.healPct(heal);
             this.advance('营火旁休整，恢复了生命');
         });
-        mkButton(root, '磨砺技艺（移除一张牌）', 380, 60, 0, 160, 18, () => this.showRemoveCard());
+        mkButton(root, '磨砺技艺（移除一张牌' + (tier === 3 ? '，恢复 15%' : '') + '）',
+            380, 60, 0, 160, 18, () => {
+                if (tier === 3) { this.healPct(0.15); }
+                this.showRemoveCard();
+            });
     }
 
     /** 删牌界面：展示整个牌组，点一张删除。 */

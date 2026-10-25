@@ -5,7 +5,7 @@
 ## 运行方式
 
 - 编辑器安装路径：`D:\cocos\Creator\3.8.8\CocosCreator.exe`
-- 用 Cocos Dashboard / 编辑器打开本目录，双击 `assets/scene/Main.scene`，点「预览」即可运行（设计分辨率 960×640）。
+- 用 Cocos Dashboard / 编辑器打开本目录，双击 `assets/scene/Main.scene`，点「预览」即可运行（设计分辨率 720×1280）。
 - 所有 UI 均为代码构建（Graphics + Label），项目不需要任何图片/预制体资源。
 
 ## 代码结构（assets/scripts/）
@@ -31,6 +31,8 @@
 - `Data.ts`：卡牌表（slot/type/desc）、8 英雄（被动+专属卡）、敌人意图 pattern、`rewardOptions` 奖励池
 - `BattleCore.ts`：纯规则（牌堆/手牌/骰子/意图/中毒/狂暴）；`BattleAI.ts`：贪心出牌 + 选牌，游戏自动战斗与模拟器共用
 - `Figures.ts`：欧式角色矢量绘制 + 专属攻击动画；地图三段：黑森林→古堡→龙巢
+- 命运掷骰：进节点先掷骰定档（1-3 平运 / 4-5 好运 / 6 天运），战斗节点扣敌血 / 首回合加骰（`fateBattleEntry`），宝箱·营火·事件各有加成；战后奖励掷骰：1-3 选 1 张普通卡、4-5 选 2 张、6 进稀有池（精英升一档）
+- 出牌演出：骰子飞入骰槽 + 卡牌飞向目标（`BattleScreen.playFx`）；`cardPick` 支持多选（picks 参数）
 - `GameMain.ts`：营地选人/招募（战绩存 `save.trials`）、分支地图、战斗奖励 3 选 1、宝箱/营火/奇遇、结算
 
 ## 平衡模拟

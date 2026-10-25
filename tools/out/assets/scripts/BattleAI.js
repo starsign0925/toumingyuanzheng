@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.pickReward = pickReward;
+exports.pickRewards = pickRewards;
 exports.planMove = planMove;
 // 骰命远征 —— 战斗 AI（自动战斗 / 平衡模拟器共用，不依赖 cc）
 // 贪心：枚举所有「卡牌 × 骰子」组合，按收益打分，每次打出最高分的一张。
@@ -106,17 +106,20 @@ const PICK = {
     starfall: 5, starlight: 7, shieldbash: 6, bigshield: 6, allin: 6, coin: 6, venom: 7, transmute: 5,
     stab2: 7, shadowstep: 6, judgment: 7, holylight: 7, fireball: 5, ignite: 6, replicate: 5, gearshot: 7,
 };
-/** 从奖励中挑一张；返回 null 表示跳过。 */
-function pickReward(options, deckSize) {
-    let best = null, bv = 0;
-    for (const id of options) {
-        const v = PICK[id] || 3;
-        if (v > bv) {
-            bv = v;
-            best = id;
+/** 从奖励中挑 n 张（按估值降序）；牌组够厚时低价值牌会被跳过，可能不足 n 张。 */
+function pickRewards(options, deckSize, n) {
+    const sorted = options.slice().sort((a, b) => (PICK[b] || 3) - (PICK[a] || 3));
+    const out = [];
+    for (const id of sorted) {
+        if (deckSize >= 16 && (PICK[id] || 3) < 7) {
+            continue;
+        }
+        out.push(id);
+        if (out.length >= n) {
+            break;
         }
     }
-    return deckSize >= 16 && bv < 7 ? null : best;
+    return out;
 }
 /** 规划下一步；返回 null 表示结束回合。 */
 function planMove(core) {

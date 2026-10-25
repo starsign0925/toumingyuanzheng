@@ -15,8 +15,8 @@ function mulberry32(seed) {
     };
 }
 const STAT = { fights: 0, rounds: 0, plays: 0 };
-function fight(hero, deck, enemy, buffs, rng) {
-    const core = new BattleCore_1.BattleCore(hero, deck, enemy, buffs, rng);
+function fight(hero, deck, enemy, buffs, rng, entry) {
+    const core = new BattleCore_1.BattleCore(hero, deck, enemy, buffs, rng, entry);
     STAT.fights++;
     for (let round = 0; round < 60; round++) {
         core.startTurn();
@@ -76,16 +76,21 @@ function run(def, rng) {
             }
         }
         if (enemy) {
-            if (!fight(hero, deck, enemy, buffs, rng)) {
+            const tier = (0, Data_1.fateTier)(1 + Math.floor(rng() * 6));
+            if (!fight(hero, deck, enemy, buffs, rng, (0, Data_1.fateBattleEntry)(node, tier))) {
                 return { cleared: false, depth, diedAt: enemy.id, deck: deck.length };
             }
             if (def.id === 'cleric') {
                 hero.hp = Math.min(hero.maxHp, hero.hp + Data_1.RULES.clericWinHeal);
             }
             if (node !== 'boss') {
-                const pick = (0, BattleAI_1.pickReward)((0, Data_1.rewardOptions)(def.id, rng, node === 'elite'), deck.length);
-                if (pick) {
-                    deck.push(pick);
+                let rt = tier;
+                if (node === 'elite' && rt < 3) {
+                    rt += 1;
+                }
+                const picks = (0, BattleAI_1.pickRewards)((0, Data_1.rewardOptions)(def.id, rng, rt === 3), deck.length, rt === 2 ? 2 : 1);
+                for (const p of picks) {
+                    deck.push(p);
                 }
             }
         }

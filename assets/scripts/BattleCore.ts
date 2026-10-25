@@ -1,7 +1,7 @@
 // 骰命远征 —— 纯战斗规则（不依赖 cc，游戏与平衡模拟器共用）
 // 杀戮尖塔式回合：掷骰 + 抽牌 → 把骰子放进卡牌骰槽触发效果 → 结束回合 → 敌人执行意图。
 import { RULES, cardById, slotOk } from './Data';
-import type { CardDef, EnemyDef, HeroInst, Intent, RunBuffs } from './Data';
+import type { CardDef, EnemyDef, HeroInst, Intent, RunBuffs, BattleEntry } from './Data';
 
 export type Rng = () => number;
 
@@ -56,13 +56,19 @@ export class BattleCore {
 
     private nextDie = 1;
     private gamblerFlip = false;
+    private firstDie = 0;
 
-    constructor(hero: HeroInst, deck: string[], enemy: EnemyDef, buffs: RunBuffs, rng: Rng = Math.random) {
+    constructor(hero: HeroInst, deck: string[], enemy: EnemyDef, buffs: RunBuffs,
+        rng: Rng = Math.random, entry: BattleEntry = null) {
         this.hero = hero;
         this.enemy = enemy;
         this.buffs = buffs;
         this.rng = rng;
         this.enemyHp = enemy.maxHp;
+        if (entry && entry.hpCut > 0) {
+            this.enemyHp = Math.max(1, this.enemyHp - Math.floor(enemy.maxHp * entry.hpCut));
+        }
+        this.firstDie = entry && entry.firstDie > 0 ? entry.firstDie : 0;
         this.drawPile = deck.map((id, i) => ({ uid: i + 1, def: cardById(id) })).filter((c) => !!c.def);
         this.shuffle(this.drawPile);
     }
@@ -129,7 +135,9 @@ export class BattleCore {
         this.block = this.heroId === 'bulwark' ? Math.floor(this.block / 2) : 0;
         this.gamblerFlip = false;
         this.dice = [];
-        const n = Math.max(1, Math.min(RULES.maxDice, RULES.dicePerTurn + this.buffs.extraDie - this.curse));
+        const n = Math.max(1, Math.min(RULES.maxDice,
+            RULES.dicePerTurn + this.buffs.extraDie + this.firstDie - this.curse));
+        this.firstDie = 0;
         this.curse = 0;
         for (let i = 0; i < n; i++) { this.addDie(this.rollFace()); }
         if (this.heroId === 'astro') {

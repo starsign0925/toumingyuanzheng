@@ -1,11 +1,12 @@
 // 骰命远征 —— 平衡性模拟器（单人冒险 · 骰子卡牌）
 // 用与游戏完全相同的 BattleCore + BattleAI 批量跑远征，输出各英雄通关率。
 import { BattleCore } from '../assets/scripts/BattleCore';
-import { planMove, pickReward } from '../assets/scripts/BattleAI';
+import { planMove, pickRewards } from '../assets/scripts/BattleAI';
 import {
     HEROES, NORMAL_ENEMIES, ELITES, BOSS, RULES, makeHero, starterDeck, rewardOptions,
+    fateTier, fateBattleEntry,
 } from '../assets/scripts/Data';
-import type { EnemyDef, HeroDef, HeroInst, RunBuffs } from '../assets/scripts/Data';
+import type { EnemyDef, HeroDef, HeroInst, RunBuffs, BattleEntry, NodeKind } from '../assets/scripts/Data';
 
 declare const process: { argv: string[] };
 declare const console: { log: (...a: unknown[]) => void };
@@ -21,8 +22,9 @@ function mulberry32(seed: number) {
 
 const STAT = { fights: 0, rounds: 0, plays: 0 };
 
-function fight(hero: HeroInst, deck: string[], enemy: EnemyDef, buffs: RunBuffs, rng: () => number): boolean {
-    const core = new BattleCore(hero, deck, enemy, buffs, rng);
+function fight(hero: HeroInst, deck: string[], enemy: EnemyDef, buffs: RunBuffs,
+    rng: () => number, entry?: BattleEntry): boolean {
+    const core = new BattleCore(hero, deck, enemy, buffs, rng, entry);
     STAT.fights++;
     for (let round = 0; round < 60; round++) {
         core.startTurn();
@@ -65,13 +67,16 @@ function run(def: HeroDef, rng: () => number): RunOut {
             }
         }
         if (enemy) {
-            if (!fight(hero, deck, enemy, buffs, rng)) {
+            const tier = fateTier(1 + Math.floor(rng() * 6));
+            if (!fight(hero, deck, enemy, buffs, rng, fateBattleEntry(node as NodeKind, tier))) {
                 return { cleared: false, depth, diedAt: enemy.id, deck: deck.length };
             }
             if (def.id === 'cleric') { hero.hp = Math.min(hero.maxHp, hero.hp + RULES.clericWinHeal); }
             if (node !== 'boss') {
-                const pick = pickReward(rewardOptions(def.id, rng, node === 'elite'), deck.length);
-                if (pick) { deck.push(pick); }
+                let rt = tier;
+                if (node === 'elite' && rt < 3) { rt += 1; }
+                const picks = pickRewards(rewardOptions(def.id, rng, rt === 3), deck.length, rt === 2 ? 2 : 1);
+                for (const p of picks) { deck.push(p); }
             }
         }
         depth++;

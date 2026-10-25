@@ -97,14 +97,16 @@ const PICK: { [id: string]: number } = {
     stab2: 7, shadowstep: 6, judgment: 7, holylight: 7, fireball: 5, ignite: 6, replicate: 5, gearshot: 7,
 };
 
-/** 从奖励中挑一张；返回 null 表示跳过。 */
-export function pickReward(options: string[], deckSize: number): string | null {
-    let best: string | null = null, bv = 0;
-    for (const id of options) {
-        const v = PICK[id] || 3;
-        if (v > bv) { bv = v; best = id; }
+/** 从奖励中挑 n 张（按估值降序）；牌组够厚时低价值牌会被跳过，可能不足 n 张。 */
+export function pickRewards(options: string[], deckSize: number, n: number): string[] {
+    const sorted = options.slice().sort((a, b) => (PICK[b] || 3) - (PICK[a] || 3));
+    const out: string[] = [];
+    for (const id of sorted) {
+        if (deckSize >= 16 && (PICK[id] || 3) < 7) { continue; }
+        out.push(id);
+        if (out.length >= n) { break; }
     }
-    return deckSize >= 16 && bv < 7 ? null : best;
+    return out;
 }
 
 /** 规划下一步；返回 null 表示结束回合。 */

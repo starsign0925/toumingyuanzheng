@@ -5,7 +5,7 @@ exports.BattleCore = void 0;
 // 杀戮尖塔式回合：掷骰 + 抽牌 → 把骰子放进卡牌骰槽触发效果 → 结束回合 → 敌人执行意图。
 const Data_1 = require("./Data");
 class BattleCore {
-    constructor(hero, deck, enemy, buffs, rng = Math.random) {
+    constructor(hero, deck, enemy, buffs, rng = Math.random, entry = null) {
         this.block = 0;
         this.enemyHp = 0;
         this.enemyBlock = 0;
@@ -22,11 +22,16 @@ class BattleCore {
         this.dice = [];
         this.nextDie = 1;
         this.gamblerFlip = false;
+        this.firstDie = 0;
         this.hero = hero;
         this.enemy = enemy;
         this.buffs = buffs;
         this.rng = rng;
         this.enemyHp = enemy.maxHp;
+        if (entry && entry.hpCut > 0) {
+            this.enemyHp = Math.max(1, this.enemyHp - Math.floor(enemy.maxHp * entry.hpCut));
+        }
+        this.firstDie = entry && entry.firstDie > 0 ? entry.firstDie : 0;
         this.drawPile = deck.map((id, i) => ({ uid: i + 1, def: (0, Data_1.cardById)(id) })).filter((c) => !!c.def);
         this.shuffle(this.drawPile);
     }
@@ -88,7 +93,8 @@ class BattleCore {
         this.block = this.heroId === 'bulwark' ? Math.floor(this.block / 2) : 0;
         this.gamblerFlip = false;
         this.dice = [];
-        const n = Math.max(1, Math.min(Data_1.RULES.maxDice, Data_1.RULES.dicePerTurn + this.buffs.extraDie - this.curse));
+        const n = Math.max(1, Math.min(Data_1.RULES.maxDice, Data_1.RULES.dicePerTurn + this.buffs.extraDie + this.firstDie - this.curse));
+        this.firstDie = 0;
         this.curse = 0;
         for (let i = 0; i < n; i++) {
             this.addDie(this.rollFace());

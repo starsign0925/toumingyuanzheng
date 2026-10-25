@@ -9,6 +9,9 @@ exports.makeHero = makeHero;
 exports.heroById = heroById;
 exports.starterDeck = starterDeck;
 exports.rewardOptions = rewardOptions;
+exports.fateTier = fateTier;
+exports.fateBattleEntry = fateBattleEntry;
+exports.fateLines = fateLines;
 exports.SLOT_TEXT = {
     any: '任意', min4: '≥4', max3: '≤3', odd: '奇数', even: '偶数', six: '6', none: '—',
 };
@@ -147,3 +150,36 @@ exports.RULES = {
 exports.NODE_NAME = {
     battle: '遭遇战', elite: '精英战', treasure: '宝箱', event: '奇遇', rest: '营火', boss: '首领',
 };
+/** 掷骰定运：1-3 平运 / 4-5 好运 / 6 天运 */
+function fateTier(roll) {
+    return roll <= 3 ? 1 : roll <= 5 ? 2 : 3;
+}
+// [tier1, tier2, tier3] → [敌血削减比例, 首回合额外骰子]
+const FATE_BATTLE = {
+    battle: [[0, 0], [0.10, 0], [0.20, 1]],
+    elite: [[0, 0], [0.08, 0], [0.15, 1]],
+    boss: [[0, 0], [0.05, 0], [0.10, 1]],
+};
+/** 战斗节点的命运增益（游戏与模拟器共用）。 */
+function fateBattleEntry(kind, tier) {
+    const e = (FATE_BATTLE[kind] || FATE_BATTLE.battle)[tier - 1];
+    return { hpCut: e[0], firstDie: e[1] };
+}
+/** 命运掷骰结果文案：第一行运势名，第二行增益说明。 */
+function fateLines(kind, tier) {
+    const t = tier === 3 ? '天 运 ！' : tier === 2 ? '好 运' : '平 运';
+    const cut = (FATE_BATTLE[kind] || [0])[tier - 1];
+    switch (kind) {
+        case 'battle':
+        case 'elite':
+        case 'boss':
+            return [t, tier === 1 ? '此行无额外增益'
+                    : '敌军开局生命 -' + Math.round(cut[0] * 100) + '%' + (cut[1] ? '，首回合 +1 骰' : '')];
+        case 'treasure':
+            return [t, tier === 1 ? '箱中无惊喜' : tier === 2 ? '开箱收益提升' : '开箱收益大幅提升'];
+        case 'rest':
+            return [t, tier === 1 ? '营火恢复 30%' : tier === 2 ? '营火恢复 45%' : '营火恢复 60%，磨砺亦回血'];
+        default:
+            return [t, tier === 1 ? '事件照常进行' : tier === 2 ? '事件收益 ×1.5' : '事件收益 ×2'];
+    }
+}

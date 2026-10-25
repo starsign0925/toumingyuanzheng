@@ -1,7 +1,7 @@
 // 骰命远征 —— 战斗界面（竖屏：骰子 × 卡牌，杀戮尖塔式意图）
 import { _decorator, Component, Node, Label, Graphics, Color, EventTouch, tween, Vec3, UIOpacity } from 'cc';
 import { RULES, cardById, slotOk } from './Data';
-import type { EnemyDef, HeroInst, RunBuffs } from './Data';
+import type { EnemyDef, HeroInst, RunBuffs, BattleEntry } from './Data';
 import { BattleCore } from './BattleCore';
 import type { CardInst, DieT, PlayResult, EnemyResult } from './BattleCore';
 import { planMove } from './BattleAI';
@@ -11,7 +11,7 @@ import {
 } from './UI';
 import type { BtnHandle, BarHandle, CardView } from './UI';
 import {
-    buildRig, rigIdle, heroAttack, enemyAttack, castFx, hurt, die, enrage, centerOf, burst,
+    buildRig, rigIdle, heroAttack, enemyAttack, castFx, hurt, die, enrage, centerOf, burst, posIn,
 } from './Figures';
 import type { Rig } from './Figures';
 
@@ -50,6 +50,8 @@ export class BattleScreen extends Component {
     private btnAuto: BtnHandle = null;
     private enemyRig: Rig = null;
     private heroRig: Rig = null;
+    private cardNodes: { [uid: number]: Node } = {};
+    private dieNodes: { [id: number]: Node } = {};
 
     private static readonly EX = 210;  // 敌人立绘 x
     private static readonly EY = 415;  // 敌人立绘中心 y
@@ -59,14 +61,22 @@ export class BattleScreen extends Component {
     private static readonly HAND_Y = -390;
 
     init(hero: HeroInst, deck: string[], enemy: EnemyDef, buffs: RunBuffs,
-        onEnd: (won: boolean, gold: number) => void, auto = false) {
-        this.core = new BattleCore(hero, deck, enemy, buffs);
+        onEnd: (won: boolean, gold: number) => void, auto = false, entry?: BattleEntry) {
+        this.core = new BattleCore(hero, deck, enemy, buffs, Math.random, entry);
         this.onEnd = onEnd;
         this.auto = auto;
         this.buildUI();
         this.log('遭遇 ' + enemy.name + ' —— ' + enemy.desc);
         const c = centerOf(this.enemyRig, this.node);
         floatText(this.node, enemy.name + ' 出现了！', c.x - 60, c.y + 60, COL.gold, 28);
+        if (entry && entry.hpCut > 0) {
+            floatText(this.node, '命运压制 -' + Math.round(entry.hpCut * 100) + '%',
+                c.x, c.y + 16, COL.red, 24);
+        }
+        if (entry && entry.firstDie > 0) {
+            this.scheduleOnce(() => floatText(this.node, '命运加持：首回合 +1 骰',
+                centerOf(this.heroRig, this.node).x, centerOf(this.heroRig, this.node).y + 80, COL.gold, 24), 0.6);
+        }
         this.startTurn();
     }
 
@@ -179,6 +189,7 @@ export class BattleScreen extends Component {
         this.selDie = null;
         this.selCard = null;
         if (r.killed) { this.busy = true; }
+        this.playFx(card, die);
         // 表现：攻击→英雄出手；技能/骰子→施法光环
         const enemyPos = centerOf(this.enemyRig, this.node);
         const heroPos = centerOf(this.heroRig, this.node);
@@ -214,6 +225,45 @@ export class BattleScreen extends Component {
             this.refresh();
             if (r.killed) { this.winBattle(); }
         }, Math.max(t, 0.5));
+    }
+
+    /** 出牌演出：骰子飞进卡牌骰槽，卡牌再飞向目标（攻击→敌人，其余→英雄）。 */
+    private playFx(card: CardInst, die: DieT | null) {
+        const layer = this.node;
+        const cardNode = this.cardNodes[card.uid];
+        const dieNode = die ? this.dieNodes[die.id] : null;
+        const cp = cardNode && cardNode.isValid
+            ? posIn(layer, cardNode) : new Vec3(0, BattleScreen.HAND_Y, 0);
+        if (die && dieNode && dieNode.isValid) {
+            const dp = posIn(layer, dieNode);
+            const d = mkNode(layer, 'adie', DIE_SIZE, DIE_SIZE, dp.x, dp.y);
+            drawDie(d.addComponent(Graphics), DIE_SIZE, { value: die.value });
+            tween(d).to(0.22, {
+                position: new Vec3(cp.x, cp.y + 66, 0), angle: 360,
+                scale: new Vec3(0.6, 0.6, 1),
+            }, { easing: 'quadIn' }).start();
+            tween(d).delay(0.24).to(0.08, { scale: new Vec3(0.01, 0.01, 1) })
+                .call(() => d.destroy()).start();
+        }
+        if (!cardNode || !cardNode.isValid) { return; }
+        const cv = mkCard(layer, card.def, cp.x, cp.y, CARD_W, CARD_H);
+        cv.node.setScale(0.9, 0.9, 1);
+        const op = cv.node.addComponent(UIOpacity);
+        if (card.def.type === 'attack') {
+            const e = centerOf(this.enemyRig, layer);
+            tween(cv.node).delay(0.08)
+                .to(0.26, { position: new Vec3(e.x, e.y + 10, 0), angle: -14 },
+                    { easing: 'quadIn' }).start();
+            tween(cv.node).delay(0.08).to(0.26, { scale: new Vec3(0.35, 0.35, 1) }).start();
+            tween(op).delay(0.28).to(0.1, { opacity: 0 }).call(() => cv.node.destroy()).start();
+        } else {
+            const h = centerOf(this.heroRig, layer);
+            tween(cv.node).to(0.3, {
+                position: new Vec3(h.x, h.y + 50, 0), angle: 8,
+                scale: new Vec3(0.5, 0.5, 1),
+            }, { easing: 'quadOut' }).start();
+            tween(op).delay(0.22).to(0.14, { opacity: 0 }).call(() => cv.node.destroy()).start();
+        }
     }
 
     private cardText(card: CardInst, X: number, r: PlayResult): string {
@@ -360,6 +410,7 @@ export class BattleScreen extends Component {
 
         // 骰子
         this.diceNode.removeAllChildren();
+        this.dieNodes = {};
         const n = core.dice.length;
         for (let i = 0; i < n; i++) {
             const d = core.dice[i];
@@ -367,6 +418,7 @@ export class BattleScreen extends Component {
             const usable = !this.selCard || this.selCard.def.slot === 'none' ||
                 (d !== undefined && slotOk(this.selCard.def.slot, d.value));
             const dn = mkNode(this.diceNode, 'die' + i, DIE_SIZE, DIE_SIZE, x, this.selDie === d ? 12 : 0);
+            this.dieNodes[d.id] = dn;
             drawDie(dn.addComponent(Graphics), DIE_SIZE, { value: d.value, sel: this.selDie === d });
             if (!usable) {
                 const op = dn.addComponent(UIOpacity);
@@ -380,6 +432,7 @@ export class BattleScreen extends Component {
 
         // 手牌
         this.handNode.removeAllChildren();
+        this.cardNodes = {};
         const m = core.hand.length;
         const span = Math.min(600, (m - 1) * 150);
         for (let i = 0; i < m; i++) {
@@ -387,6 +440,7 @@ export class BattleScreen extends Component {
             const x = m === 1 ? 0 : -span / 2 + i * (span / (m - 1));
             const lift = this.selCard === c ? 26 : 0;
             const cn = mkCard(this.handNode, c.def, x, lift, CARD_W, CARD_H);
+            this.cardNodes[c.uid] = cn.node;
             const playable = core.anyPlayable() && (c.def.slot === 'none'
                 ? core.canPlay(c, null)
                 : core.dice.some((d) => core.canPlay(c, d)));
