@@ -29,6 +29,7 @@ export class GameMain extends Component {
     private autoBattle = false;
     private marker: Node = null;
     private mapBusy = false;
+    private trial: { [id: string]: boolean } = {};
 
     onLoad() {
         this.load();
@@ -111,7 +112,7 @@ export class GameMain extends Component {
     private showHome() {
         const root = this.clearScreen();
         this.run = null;
-        if (!this.pick || this.save.owned.indexOf(this.pick) < 0) {
+        if (!this.pick || (this.save.owned.indexOf(this.pick) < 0 && !this.trial[this.pick])) {
             this.pick = this.save.owned[0];
         }
 
@@ -130,25 +131,30 @@ export class GameMain extends Component {
             const x = -170 + col * 340;
             const y = 380 - rowIdx * (cardH + gapY);
             const owned = this.save.owned.indexOf(def.id) >= 0;
+            const trying = !owned && !!this.trial[def.id];
+            const usable = owned || trying;
             const p = mkPanel(root, cardW, cardH, x, y,
-                owned ? COL.panel : COL.btnOff, 8, COL.border, 2);
+                usable ? COL.panel : COL.btnOff, 8, COL.border, 2);
             const c = def.color;
             mkPanel(p.node, cardW, 26, 0, cardH / 2 - 13,
-                owned ? new Color(c[0], c[1], c[2], 255) : new Color(60, 52, 46, 255), 6, null, 0);
+                usable ? new Color(c[0], c[1], c[2], 255) : new Color(60, 52, 46, 255), 6, null, 0);
             mkLabel(p.node, def.name + '·' + def.title + '　HP ' + def.maxHp, 16,
                 new Color(255, 255, 255, 255), 0, cardH / 2 - 13);
             const r = buildRig(p.node, def.id, 92, -108, -18);
             rigIdle(r, i * 0.1);
-            if (!owned) { r.root.addComponent(UIOpacity).opacity = 70; }
+            if (!usable) { r.root.addComponent(UIOpacity).opacity = 70; }
             const t = (this.save.trials || {})[def.id];
             mkLabel(p.node, def.passive, 11.5, COL.dim, 36, 8, 170);
             mkLabel(p.node, owned ? (t ? '远征战绩 ' + t.clears + '/' + t.runs : '尚未出征')
-                : '未招募', 12, owned ? COL.gold : COL.dim, 36, -44);
-            if (owned) {
+                : trying ? '试玩中（一次）' : '未招募 · 看广告试玩', 12,
+                owned ? COL.gold : trying ? COL.green : COL.dim, 36, -44);
+            if (usable) {
                 p.node.on(Node.EventType.TOUCH_END, () => {
                     this.pick = def.id;
                     this.showHome();
                 });
+            } else {
+                p.node.on(Node.EventType.TOUCH_END, () => this.showFakeAd(def.id));
             }
             btns[def.id] = p.node;
         }
@@ -167,6 +173,46 @@ export class GameMain extends Component {
             300, 62, 170, -470, 20, () => this.onRecruit());
         setBtnEnabled(rec, canRecruit, 300, 62);
         mkLabel(root, '战斗：掷骰后把骰子放进卡牌触发效果，牌组随战利品成长。', 13, COL.dim, 0, -560);
+    }
+
+    /** 模拟广告：倒计时 5s 后解锁该英雄一次试玩（正式版换激励视频回调）。 */
+    private showFakeAd(heroId: string) {
+        const ov = mkPanel(this.node, 520, 680, 0, 0, COL.panelLight, 12, COL.gold, 3);
+        ov.node.addComponent(BlockInputEvents);
+        popIn(ov.node, 0.35, 0.4, 1.1);
+        mkLabel(ov.node, '广告 · 试玩 ' + heroById(heroId).name, 22, COL.gold, 0, 292);
+        mkLabel(ov.node, '（正式版接入广告后播放激励视频）', 12, COL.dim, 0, 262);
+        const r = buildRig(ov.node, heroId, 130, 0, 100);
+        rigIdle(r);
+        const dn = mkNode(ov.node, 'die', 84, 84, 0, -50);
+        const dg = dn.addComponent(Graphics);
+        drawDie(dg, 84, { value: 6 });
+        let left = 5;
+        const cd = mkLabel(ov.node, '剩余 ' + left + ' s', 18, COL.text, 0, -150);
+        const closeB = mkButton(ov.node, '观看中…', 200, 54, 0, -230, 18, () => {
+            if (left > 0) { return; }
+            this.trial[heroId] = true;
+            this.pick = heroId;
+            ov.node.destroy();
+            this.showHome();
+        });
+        setBtnEnabled(closeB, false, 200, 54);
+        mkButton(ov.node, '算了', 120, 44, 0, -300, 15, () => ov.node.destroy());
+        const tick = () => {
+            left--;
+            drawDie(dg, 84, { value: 1 + Math.floor(Math.random() * 6) });
+            dn.angle = (Math.random() - 0.5) * 40;
+            if (left <= 0) {
+                dn.angle = 0;
+                cd.string = '试玩已解锁！';
+                closeB.label.string = '领取试玩';
+                setBtnEnabled(closeB, true, 200, 54);
+                this.unschedule(tick);
+                return;
+            }
+            cd.string = '剩余 ' + left + ' s';
+        };
+        this.schedule(tick, 1);
     }
 
     private onRecruit() {
@@ -586,6 +632,7 @@ export class GameMain extends Component {
         t.runs++;
         if (cleared) { t.clears++; }
         this.save.trials[id] = t;
+        delete this.trial[id]; // 试玩一局后收回
         this.store();
     }
 
