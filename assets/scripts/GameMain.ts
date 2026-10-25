@@ -303,12 +303,16 @@ export class GameMain extends Component {
         }
         const out: { x: number; y: number; s: number; k: number }[] = [];
         for (let i = 0; i < 60 && out.length < 30; i++) {
-            const x = -290 + rnd() * 580, y = -290 + rnd() * 530;
+            const sp = GameMain.STRIPS[Math.floor(rnd() * 3)];
+            const x = sp[0] + 14 + rnd() * (sp[1] - sp[0] - 28);
+            const y = -290 + rnd() * 530;
             if (nodePts.some((p) => Math.abs(p.x - x) < 62 && Math.abs(p.y - y) < 62)) { continue; }
             out.push({ x, y, s: 9 + rnd() * 13, k: Math.floor(rnd() * 4) });
         }
         return out;
     }
+
+    private static readonly STRIPS = [[-280, -122], [-40, 118], [120, 280]];
 
     private drawOrn(g: Graphics, stage: number, x: number, y: number, s: number, k: number) {
         switch (stage) {
@@ -385,13 +389,19 @@ export class GameMain extends Component {
         });
         mkLabel(root, '点击发光节点前进，走过无法回头', 12, COL.dim, 160, -600);
 
-        // 地图容器（每关一种底色 + 关卡名）
+        // 地图容器：三条路线各自的走廊底色（不再是一整块色块）
         const mapRoot = mkNode(root, 'map', 0, 0, 0, -40);
         const st = STAGES[run.stage];
         const bg = mkNode(mapRoot, 'bands', 620, 640, 0, 0).addComponent(Graphics);
-        bg.fillColor = new Color(st.color[0], st.color[1], st.color[2], 255);
-        bg.roundRect(-310, -306, 620, 560, 18);
-        bg.fill();
+        const bandCol = new Color(st.color[0], st.color[1], st.color[2], 190);
+        for (const b of GameMain.STRIPS) {
+            bg.fillColor = bandCol;
+            bg.strokeColor = new Color(166, 126, 66, 80);
+            bg.lineWidth = 2;
+            bg.roundRect(b[0], -298, b[1] - b[0], 552, 16);
+            bg.fill();
+            bg.stroke();
+        }
         bg.fillColor = new Color(255, 255, 255, 70);
         for (const d of run.deco) { bg.circle(d.x * 0.9, d.y - 40, d.r); bg.fill(); }
         for (const o of this.stageOrn(run.stage)) { this.drawOrn(bg, run.stage, o.x, o.y, o.s, o.k); }
