@@ -154,7 +154,7 @@ export class GameMain extends Component {
                     this.showHome();
                 });
             } else {
-                p.node.on(Node.EventType.TOUCH_END, () => this.showFakeAd(def.id));
+                p.node.on(Node.EventType.TOUCH_END, () => this.onRecruit());
             }
             btns[def.id] = p.node;
         }
@@ -231,7 +231,7 @@ export class GameMain extends Component {
             rigIdle(r, i * 0.1);
             mkLabel(ov.node, def.name + '·' + def.title + ' HP' + def.maxHp, 16, COL.text, -60, y + 22);
             mkLabel(ov.node, def.passive, 11, COL.dim, -60, y - 8, 290);
-            const bb = mkButton(ov.node, RULES.recruitCost + ' 金币招募', 130, 40, 185, y - 22, 14, () => {
+            const bb = mkButton(ov.node, RULES.recruitCost + ' 金币', 108, 40, 108, y - 22, 13, () => {
                 if (this.save.gold < RULES.recruitCost) { return; }
                 this.save.gold -= RULES.recruitCost;
                 this.save.owned.push(def.id);
@@ -239,7 +239,8 @@ export class GameMain extends Component {
                 ov.node.destroy();
                 this.recruitDone(def);
             });
-            setBtnEnabled(bb, this.save.gold >= RULES.recruitCost, 130, 40);
+            setBtnEnabled(bb, this.save.gold >= RULES.recruitCost, 108, 40);
+            mkButton(ov.node, '广告试玩', 100, 40, 218, y - 22, 13, () => this.showFakeAd(def.id));
         }
         mkButton(ov.node, '算了', 120, 44, 0, -332, 15, () => ov.node.destroy());
     }
