@@ -287,6 +287,56 @@ export class GameMain extends Component {
         }).start();
     }
 
+    /** 关卡主题装饰物：种子随机撒布（同关布局固定），避开节点位置。 */
+    private stageOrn(stage: number): { x: number; y: number; s: number; k: number }[] {
+        let seed = stage * 7919 + 13;
+        const rnd = () => { seed = (seed * 48271) % 2147483647; return seed / 2147483647; };
+        const nodePts: { x: number; y: number }[] = [];
+        for (let r = 0; r < 6; r++) {
+            for (const s of [0, 0.5, 1.5, 2, 2.5, 3]) {
+                nodePts.push({ x: this.slotX(s), y: this.rowY(r) });
+            }
+        }
+        const out: { x: number; y: number; s: number; k: number }[] = [];
+        for (let i = 0; i < 60 && out.length < 30; i++) {
+            const x = -290 + rnd() * 580, y = -290 + rnd() * 530;
+            if (nodePts.some((p) => Math.abs(p.x - x) < 62 && Math.abs(p.y - y) < 62)) { continue; }
+            out.push({ x, y, s: 9 + rnd() * 13, k: Math.floor(rnd() * 4) });
+        }
+        return out;
+    }
+
+    private drawOrn(g: Graphics, stage: number, x: number, y: number, s: number, k: number) {
+        switch (stage) {
+            case 0: // 黑森林：松树剪影
+                g.fillColor = new Color(16, 28, 18, 255);
+                g.moveTo(x, y + s); g.lineTo(x - s * 0.7, y - s * 0.1); g.lineTo(x + s * 0.7, y - s * 0.1); g.close(); g.fill();
+                g.moveTo(x, y + s * 0.4); g.lineTo(x - s * 0.85, y - s * 0.9); g.lineTo(x + s * 0.85, y - s * 0.9); g.close(); g.fill();
+                break;
+            case 1: // 古堡：残砖断壁
+                g.fillColor = new Color(32, 30, 36, 255);
+                g.rect(x - s * 0.5, y - s * 0.3, s, s * 0.6); g.fill();
+                if (k % 2 === 0) { g.rect(x - s * 0.15, y + s * 0.3, s * 0.3, s * 0.5); g.fill(); }
+                else { g.rect(x - s * 0.7, y - s * 0.1, s * 0.35, s * 0.35); g.fill(); }
+                break;
+            case 2: // 地穴：晶簇
+                g.fillColor = new Color(78, 118, 130, 210);
+                g.moveTo(x, y + s * 0.85); g.lineTo(x - s * 0.4, y); g.lineTo(x, y - s * 0.45); g.lineTo(x + s * 0.4, y); g.close(); g.fill();
+                if (k % 2 === 0) {
+                    g.moveTo(x + s * 0.5, y + s * 0.5); g.lineTo(x + s * 0.25, y - s * 0.05); g.lineTo(x + s * 0.7, y - s * 0.15); g.close(); g.fill();
+                }
+                break;
+            default: // 龙巢：火纹裂刺
+                g.fillColor = new Color(128, 54, 32, 220);
+                g.moveTo(x - s * 0.6, y - s * 0.4); g.lineTo(x - s * 0.05, y + s * 0.75); g.lineTo(x + s * 0.35, y - s * 0.15); g.close(); g.fill();
+                if (k % 2 === 0) {
+                    g.fillColor = new Color(226, 120, 50, 180);
+                    g.circle(x + s * 0.4, y + s * 0.3, s * 0.16); g.fill();
+                }
+                break;
+        }
+    }
+
     private drawMapNode(g: Graphics, kind: NodeKind, state: string) {
         g.clear();
         const s = kind === 'boss' ? 30 : 26;
@@ -340,6 +390,7 @@ export class GameMain extends Component {
         bg.fill();
         bg.fillColor = new Color(255, 255, 255, 70);
         for (const d of run.deco) { bg.circle(d.x * 0.9, d.y - 40, d.r); bg.fill(); }
+        for (const o of this.stageOrn(run.stage)) { this.drawOrn(bg, run.stage, o.x, o.y, o.s, o.k); }
         mkLabel(mapRoot, '第 ' + (run.stage + 1) + ' 关 · ' + st.name,
             19, new Color(226, 210, 180, 255), 218, 232);
 
