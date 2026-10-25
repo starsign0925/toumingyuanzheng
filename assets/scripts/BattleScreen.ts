@@ -178,6 +178,7 @@ export class BattleScreen extends Component {
         if (!r) { return; }
         this.selDie = null;
         this.selCard = null;
+        if (r.killed) { this.busy = true; }
         // 表现：攻击→英雄出手；技能/骰子→施法光环
         const enemyPos = centerOf(this.enemyRig, this.node);
         const heroPos = centerOf(this.heroRig, this.node);

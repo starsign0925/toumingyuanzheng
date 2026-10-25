@@ -486,15 +486,22 @@ export class GameMain extends Component {
     private cardPick(y0: number, options: string[], onPick: (id: string | null) => void) {
         const root = this.node.children[this.node.children.length - 1];
         const gap = 170;
+        let picked = false;
         for (let i = 0; i < options.length; i++) {
             const def = cardById(options[i]);
             const v = mkCard(root, def, -gap + i * gap, y0 + 30, 150, 210);
             v.node.on(Node.EventType.TOUCH_END, () => {
+                if (picked) { return; }
+                picked = true;
                 popIn(v.node, 0.15, 0.9, 1.05);
                 this.scheduleOnce(() => onPick(options[i]), 0.15);
             });
         }
-        mkButton(root, '跳过', 180, 52, 0, y0 - 170, 18, () => onPick(null));
+        mkButton(root, '跳过', 180, 52, 0, y0 - 170, 18, () => {
+            if (picked) { return; }
+            picked = true;
+            onPick(null);
+        });
     }
 
     private showTreasure() {
@@ -533,7 +540,7 @@ export class GameMain extends Component {
         for (let i = 0; i < ev.options.length; i++) {
             const opt = ev.options[i];
             const canPay = !(opt.apply === 'buyrare' && this.run.gold < 30);
-            mkButton(root, opt.label, 480, 60, 0, 240 - i * 80, 17, () => {
+            const ob = mkButton(root, opt.label, 480, 60, 0, 240 - i * 80, 17, () => {
                 if (!canPay) { return; }
                 switch (opt.apply) {
                     case 'gold45': this.run.gold += 45; this.advance('拾得 45 金币'); break;
@@ -551,6 +558,7 @@ export class GameMain extends Component {
                     default: this.advance('悄然离开');
                 }
             });
+            setBtnEnabled(ob, canPay, 480, 60);
         }
     }
 

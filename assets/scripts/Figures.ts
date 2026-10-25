@@ -865,6 +865,7 @@ export function hurt(rig: Rig, power = 1) {
 export function die(rig: Rig) {
     if (rig.arm) { Tween.stopAllByTarget(rig.arm); }
     for (const k in rig.parts) { Tween.stopAllByTarget(rig.parts[k]); }
+    Tween.stopAllByTarget(rig.flip);
     if (rig.enemy) {
         squashDeath(rig.body);
         const op = rig.flip.getComponent(UIOpacity) || rig.flip.addComponent(UIOpacity);
