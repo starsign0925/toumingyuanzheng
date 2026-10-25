@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2018",
+    "module": "ES2015",
+    "strict": false,
+    "experimentalDecorators": true,
+    "isolatedModules": true,
+    "moduleResolution": "node",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "cc": ["./temp/declarations/cc.d.ts"]
+    }
+  },
+  "include": [
+    "assets/scripts/**/*.ts",
+    "temp/declarations/cc.d.ts",
+    "temp/declarations/cc.env.d.ts",
+    "temp/declarations/cc.custom-macro.d.ts",
+    "temp/declarations/jsb.d.ts"
+  ]
+}
