@@ -43,58 +43,63 @@ function fight(hero, deck, enemy, buffs, rng, entry) {
     }
     return false;
 }
-// 典型路线：8 个节点（与地图生成的平均构成接近）
-const ROUTE = ['battle', 'battle', 'event', 'elite', 'battle', 'rest', 'elite', 'boss'];
+// 每关典型路线：5 个节点 + 首领（与地图生成的平均构成接近）
+const STAGE_ROUTE = ['battle', 'battle', 'event', 'elite', 'rest', 'boss'];
 function run(def, rng) {
     const hero = (0, Data_1.makeHero)(def);
     const deck = (0, Data_1.starterDeck)(def);
     const buffs = { extraDie: 0 };
     let depth = 0;
-    for (const node of ROUTE) {
-        let enemy = null;
-        if (node === 'battle') {
-            enemy = Data_1.NORMAL_ENEMIES[Math.floor(rng() * Data_1.NORMAL_ENEMIES.length)];
-        }
-        if (node === 'elite') {
-            enemy = Data_1.ELITES[Math.floor(rng() * Data_1.ELITES.length)];
-        }
-        if (node === 'boss') {
-            enemy = Data_1.BOSS;
-        }
-        if (node === 'event') {
-            hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.2);
-        }
-        if (node === 'rest') {
-            if (hero.hp < hero.maxHp * 0.7) {
-                hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * Data_1.RULES.restHealPct);
+    for (let s = 0; s < Data_1.STAGES.length; s++) {
+        for (const node of STAGE_ROUTE) {
+            let enemy = null;
+            if (node === 'battle') {
+                enemy = (0, Data_1.scaleEnemy)(Data_1.NORMAL_ENEMIES[Math.floor(rng() * Data_1.NORMAL_ENEMIES.length)], s);
             }
-            else {
-                const i = deck.indexOf('strike');
-                if (i >= 0) {
-                    deck.splice(i, 1);
+            if (node === 'elite') {
+                enemy = (0, Data_1.scaleEnemy)(Data_1.ELITES[Math.floor(rng() * Data_1.ELITES.length)], s);
+            }
+            if (node === 'boss') {
+                enemy = Data_1.STAGES[s].boss;
+            }
+            if (node === 'event') {
+                hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.2);
+            }
+            if (node === 'rest') {
+                if (hero.hp < hero.maxHp * 0.7) {
+                    hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * Data_1.RULES.restHealPct);
+                }
+                else {
+                    const i = deck.indexOf('strike');
+                    if (i >= 0) {
+                        deck.splice(i, 1);
+                    }
                 }
             }
-        }
-        if (enemy) {
-            const tier = (0, Data_1.fateTier)(1 + Math.floor(rng() * 6));
-            if (!fight(hero, deck, enemy, buffs, rng, (0, Data_1.fateBattleEntry)(node, tier))) {
-                return { cleared: false, depth, diedAt: enemy.id, deck: deck.length };
-            }
-            if (def.id === 'cleric') {
-                hero.hp = Math.min(hero.maxHp, hero.hp + Data_1.RULES.clericWinHeal);
-            }
-            if (node !== 'boss') {
-                let rt = tier;
-                if (node === 'elite' && rt < 3) {
-                    rt += 1;
+            if (enemy) {
+                const tier = (0, Data_1.fateTier)(1 + Math.floor(rng() * 6));
+                if (!fight(hero, deck, enemy, buffs, rng, (0, Data_1.fateBattleEntry)(node, tier))) {
+                    return { cleared: false, depth, diedAt: enemy.id, deck: deck.length };
                 }
-                const picks = (0, BattleAI_1.pickRewards)((0, Data_1.rewardOptions)(def.id, rng, rt === 3), deck.length, rt === 2 ? 2 : 1);
-                for (const p of picks) {
-                    deck.push(p);
+                if (def.id === 'cleric') {
+                    hero.hp = Math.min(hero.maxHp, hero.hp + Data_1.RULES.clericWinHeal);
+                }
+                if (node === 'boss' && s < Data_1.STAGES.length - 1) {
+                    hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.4); // 过关恢复 40%
+                }
+                if (node !== 'boss') {
+                    let rt = tier;
+                    if (node === 'elite' && rt < 3) {
+                        rt += 1;
+                    }
+                    const picks = (0, BattleAI_1.pickRewards)((0, Data_1.rewardOptions)(def.id, rng, rt === 3), deck.length, rt === 2 ? 2 : 1);
+                    for (const p of picks) {
+                        deck.push(p);
+                    }
                 }
             }
+            depth++;
         }
-        depth++;
     }
     return { cleared: true, depth, diedAt: '', deck: deck.length };
 }
@@ -162,7 +167,7 @@ function main() {
             if (r.cleared) {
                 clear++;
             }
-            else if (r.diedAt === 'boss') {
+            else if (Data_1.STAGES.some((st) => st.boss.id === r.diedAt)) {
                 death.b++;
             }
             else if (r.diedAt === 'lich' || r.diedAt === 'troll') {
@@ -178,7 +183,7 @@ function main() {
         const avgPlays = STAT.plays / Math.max(1, wins);
         const duels = all.map((e) => pct(duel(def, e, Math.max(200, N >> 3), rng), 1).replace('%', '') + '%');
         rates.push(clear / N);
-        console.log(def.name.padEnd(6, '　') + pct(clear, N) + '   ' + (depth / N).toFixed(2) + '/8   ' +
+        console.log(def.name.padEnd(6, '　') + pct(clear, N) + '   ' + (depth / N).toFixed(2) + '/24   ' +
             pct(death.n, N) + pct(death.e, N) + pct(death.b, N) + ' | ' + duels.join(' ') +
             ' | ' + avgRounds.toFixed(1) + ' ' + avgPlays.toFixed(1));
     }

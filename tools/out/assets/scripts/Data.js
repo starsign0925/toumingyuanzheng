@@ -2,13 +2,14 @@
 // 骰命远征 —— 数据与类型定义（单人冒险 · 骰子 × 卡牌）
 // 战斗规则：每回合掷骰并抽牌，把骰子放进卡牌的骰槽来触发效果（X = 骰子点数）。
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NODE_NAME = exports.RULES = exports.COLUMN_X = exports.EVENTS = exports.BOSS = exports.ELITES = exports.NORMAL_ENEMIES = exports.HEROES = exports.CARDS = exports.SLOT_TEXT = void 0;
+exports.NODE_NAME = exports.RULES = exports.COLUMN_X = exports.EVENTS = exports.STAGES = exports.BOSSES = exports.BOSS = exports.ELITES = exports.NORMAL_ENEMIES = exports.HEROES = exports.CARDS = exports.SLOT_TEXT = void 0;
 exports.cardById = cardById;
 exports.slotOk = slotOk;
 exports.makeHero = makeHero;
 exports.heroById = heroById;
 exports.starterDeck = starterDeck;
 exports.rewardOptions = rewardOptions;
+exports.scaleEnemy = scaleEnemy;
 exports.fateTier = fateTier;
 exports.fateBattleEntry = fateBattleEntry;
 exports.fateLines = fateLines;
@@ -67,21 +68,21 @@ function makeHero(def) {
     return { def, hp: def.maxHp, maxHp: def.maxHp };
 }
 exports.HEROES = [
-    { id: 'astro', name: '占星师', title: '观星者', maxHp: 76, color: [142, 124, 195],
+    { id: 'astro', name: '占星师', title: '观星者', maxHp: 79, color: [142, 124, 195],
         passive: '回合开始时，自动重掷所有 1-2 点骰子', cards: ['starfall', 'starlight'] },
-    { id: 'bulwark', name: '铁壁卫', title: '不动壁垒', maxHp: 78, color: [90, 120, 160],
+    { id: 'bulwark', name: '铁壁卫', title: '不动壁垒', maxHp: 68, color: [90, 120, 160],
         passive: '回合结束时保留一半护甲', cards: ['shieldbash', 'bigshield'] },
-    { id: 'gambler', name: '赌徒', title: '孤注一掷', maxHp: 66, color: [200, 150, 60],
+    { id: 'gambler', name: '赌徒', title: '孤注一掷', maxHp: 72, color: [200, 150, 60],
         passive: '每回合首次掷出的 1 点会翻成 6 点', cards: ['allin', 'coin'] },
-    { id: 'alch', name: '炼金术士', title: '点石成金', maxHp: 59, color: [80, 160, 140],
+    { id: 'alch', name: '炼金术士', title: '点石成金', maxHp: 71, color: [80, 160, 140],
         passive: '中毒每回合额外造成 1 点伤害', cards: ['venom', 'transmute'] },
-    { id: 'shadow', name: '影行者', title: '魅影连击', maxHp: 67, color: [110, 110, 130],
+    { id: 'shadow', name: '影行者', title: '魅影连击', maxHp: 69, color: [110, 110, 130],
         passive: '用奇数骰打出的攻击，每段伤害 +2', cards: ['stab2', 'shadowstep'] },
-    { id: 'cleric', name: '圣愈者', title: '晨曦之手', maxHp: 62, color: [230, 200, 120],
+    { id: 'cleric', name: '圣愈者', title: '晨曦之手', maxHp: 63, color: [230, 200, 120],
         passive: '每场战斗胜利后回复 6 点生命', cards: ['judgment', 'holylight'] },
-    { id: 'pyro', name: '烈焰术士', title: '焚运改命', maxHp: 57, color: [200, 90, 60],
+    { id: 'pyro', name: '烈焰术士', title: '焚运改命', maxHp: 62, color: [200, 90, 60],
         passive: '用 6 点骰打出的攻击，伤害 +4', cards: ['fireball', 'ignite'] },
-    { id: 'tinker', name: '机关师', title: '精密复制', maxHp: 66, color: [140, 140, 150],
+    { id: 'tinker', name: '机关师', title: '精密复制', maxHp: 68, color: [140, 140, 150],
         passive: '回合开始时额外获得一颗 2 点骰子', cards: ['replicate', 'gearshot'] },
 ];
 function heroById(id) {
@@ -122,6 +123,42 @@ exports.BOSS = {
         { type: 'atk', dmg: 4, hits: 3 }, { type: 'curse' }, { type: 'buff', str: 2 },
     ],
 };
+// 四关首领（立绘复用普通怪，visual 字段指定）
+exports.BOSSES = [
+    { id: 'trollking', name: '森林巨魔王', maxHp: 72, goldMin: 55, goldMax: 75, boss: true, visual: 'troll',
+        desc: '黑森林的统治者。血量过半时狂暴（力量+3）',
+        pattern: [{ type: 'atk', dmg: 7 }, { type: 'atkblock', dmg: 5, block: 8 }, { type: 'atk', dmg: 16 }, { type: 'buff', str: 1 }] },
+    { id: 'golemking', name: '古堡魔像', maxHp: 88, goldMin: 65, goldMax: 85, boss: true, visual: 'golem',
+        desc: '古堡深处的守门巨石。血量过半时狂暴（力量+3）',
+        pattern: [{ type: 'block', block: 10 }, { type: 'atk', dmg: 12 }, { type: 'atk', dmg: 5, hits: 2 }, { type: 'atkblock', dmg: 8, block: 10 }, { type: 'buff', str: 1 }] },
+    { id: 'lichking', name: '深渊巫妖王', maxHp: 100, goldMin: 75, goldMax: 95, boss: true, visual: 'lich',
+        desc: '地穴深处的亡者之主。血量过半时狂暴（力量+3）',
+        pattern: [{ type: 'curse' }, { type: 'atk', dmg: 10 }, { type: 'atk', dmg: 6, hits: 2 }, { type: 'block', block: 12 }, { type: 'atk', dmg: 13 }] },
+    exports.BOSS,
+];
+exports.STAGES = [
+    { name: '黑森林', boss: exports.BOSSES[0], color: [28, 44, 30] },
+    { name: '古 堡', boss: exports.BOSSES[1], color: [48, 46, 52] },
+    { name: '地 穴', boss: exports.BOSSES[2], color: [40, 54, 66] },
+    { name: '龙 巢', boss: exports.BOSSES[3], color: [62, 26, 22] },
+];
+/** 关卡难度缩放：生命 +20%/关，攻击 +1/关，格挡 +1/关，金币 +5/关（游戏与模拟器共用）。 */
+function scaleEnemy(def, stage) {
+    if (stage <= 0) {
+        return def;
+    }
+    return {
+        ...def,
+        maxHp: Math.round(def.maxHp * (1 + 0.15 * stage)),
+        goldMin: def.goldMin + stage * 5,
+        goldMax: def.goldMax + stage * 5,
+        pattern: def.pattern.map((it) => ({
+            ...it,
+            dmg: it.dmg !== undefined ? it.dmg + stage : it.dmg,
+            block: it.block !== undefined ? it.block + stage : it.block,
+        })),
+    };
+}
 exports.EVENTS = [
     { id: 'meteor', title: '流星坠夜', text: '一颗骰形的陨星砸落营地旁，余温尚在。',
         options: [{ label: '拾取星屑（+45 金币）', apply: 'gold45' }, { label: '对星许愿（恢复 25% 生命）', apply: 'heal25' }] },

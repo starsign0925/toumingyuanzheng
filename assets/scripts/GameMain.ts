@@ -1,9 +1,9 @@
 // 骰命远征 —— 入口组件（竖屏单人冒险）：营地 / 选人 / 地图 / 事件 / 宝箱 / 奖励 / 结算
 import { _decorator, Component, Node, Label, Graphics, sys, Color, tween, Vec3, UIOpacity, BlockInputEvents } from 'cc';
 import {
-    HEROES, NORMAL_ENEMIES, ELITES, BOSS, EVENTS, RULES,
+    HEROES, NORMAL_ENEMIES, ELITES, STAGES, EVENTS, RULES,
     NODE_NAME, heroById, COLUMN_X, makeHero, starterDeck, rewardOptions, cardById,
-    fateTier, fateBattleEntry, fateLines,
+    fateTier, fateBattleEntry, fateLines, scaleEnemy,
 } from './Data';
 import type {
     HeroInst, EnemyDef, EventDef, NodeKind, MapNode, RunState, SaveData, BattleEntry,
@@ -206,6 +206,7 @@ export class GameMain extends Component {
             posRow: -1,
             posCol: -1,
             depth: 0,
+            stage: 0,
             deco,
         };
         this.mapMsg = '远征开始！点击发光节点沿路线前进';
@@ -219,7 +220,7 @@ export class GameMain extends Component {
         // 三条路线：各自独立的槽位走廊（互不重叠），行间默认只沿本线前进
         const LANES: number[][] = [[0, 0.5], [1.5, 2], [2.5, 3]];
         const map: MapNode[][] = [];
-        for (let r = 0; r < 7; r++) {
+        for (let r = 0; r < 5; r++) {
             map.push(LANES.map((slots) => ({
                 kind: pick(),
                 slot: slots[Math.floor(Math.random() * slots.length)],
@@ -237,7 +238,7 @@ export class GameMain extends Component {
             }
         }
         map.push([{ kind: 'boss', slot: 1.5, links: [], done: false }]);
-        for (let l = 0; l < LANES.length; l++) { map[6][l].links.push(0); }
+        for (let l = 0; l < LANES.length; l++) { map[map.length - 2][l].links.push(0); }
         return map;
     }
 
@@ -247,7 +248,7 @@ export class GameMain extends Component {
     }
 
     private rowY(r: number): number {
-        return -300 + r * 80;
+        return -280 + r * 104;
     }
 
     private reachable(r: number, i: number): boolean {
@@ -323,24 +324,17 @@ export class GameMain extends Component {
         });
         mkLabel(root, '点击发光节点前进，走过无法回头', 12, COL.dim, 160, -600);
 
-        // 地图容器
+        // 地图容器（每关一种底色 + 关卡名）
         const mapRoot = mkNode(root, 'map', 0, 0, 0, -40);
-        const bands = [
-            { y: -260, h: 250, c: new Color(28, 44, 30, 255), name: '黑森林' },
-            { y: -10, h: 230, c: new Color(48, 46, 52, 255), name: '古 堡' },
-            { y: 225, h: 150, c: new Color(62, 26, 22, 255), name: '龙 巢' },
-        ];
+        const st = STAGES[run.stage];
         const bg = mkNode(mapRoot, 'bands', 620, 640, 0, 0).addComponent(Graphics);
-        for (const b of bands) {
-            bg.fillColor = b.c;
-            bg.roundRect(-310, b.y - b.h / 2, 620, b.h, 18);
-            bg.fill();
-        }
+        bg.fillColor = new Color(st.color[0], st.color[1], st.color[2], 255);
+        bg.roundRect(-310, -306, 620, 560, 18);
+        bg.fill();
         bg.fillColor = new Color(255, 255, 255, 70);
         for (const d of run.deco) { bg.circle(d.x * 0.9, d.y - 40, d.r); bg.fill(); }
-        for (const b of bands) {
-            mkLabel(mapRoot, b.name, 17, new Color(200, 190, 175, 255), 268, b.y + b.h / 2 - 22);
-        }
+        mkLabel(mapRoot, '第 ' + (run.stage + 1) + ' 关 · ' + st.name,
+            19, new Color(226, 210, 180, 255), 218, 232);
 
         // 连线
         const lg = mkNode(mapRoot, 'links', 0, 0, 0, 0).addComponent(Graphics);
@@ -414,14 +408,16 @@ export class GameMain extends Component {
     private enterNodeContent(kind: NodeKind, tier: number) {
         switch (kind) {
             case 'battle':
-                this.startBattle(NORMAL_ENEMIES[Math.floor(Math.random() * NORMAL_ENEMIES.length)],
+                this.startBattle(scaleEnemy(
+                    NORMAL_ENEMIES[Math.floor(Math.random() * NORMAL_ENEMIES.length)], this.run.stage),
                     fateBattleEntry(kind, tier));
                 break;
             case 'elite':
-                this.startBattle(ELITES[Math.floor(Math.random() * ELITES.length)],
+                this.startBattle(scaleEnemy(
+                    ELITES[Math.floor(Math.random() * ELITES.length)], this.run.stage),
                     fateBattleEntry(kind, tier));
                 break;
-            case 'boss': this.startBattle(BOSS, fateBattleEntry(kind, tier)); break;
+            case 'boss': this.startBattle(STAGES[this.run.stage].boss, fateBattleEntry(kind, tier)); break;
             case 'treasure': this.showTreasure(tier); break;
             case 'event': this.showEvent(EVENTS[Math.floor(Math.random() * EVENTS.length)], tier); break;
             case 'rest': this.showRest(tier); break;
@@ -500,8 +496,18 @@ export class GameMain extends Component {
         this.run.depth++;
         this.mapMsg = msg;
         if (nd.kind === 'boss') {
-            this.finishRun(true);
-            this.showSettle(true);
+            if (this.run.stage >= STAGES.length - 1) {
+                this.finishRun(true);
+                this.showSettle(true);
+            } else {
+                this.run.stage++;
+                this.run.map = this.genMap();
+                this.run.posRow = -1;
+                this.run.posCol = -1;
+                this.healPct(0.4);
+                this.mapMsg = '凯旋！进入第 ' + (this.run.stage + 1) + ' 关（恢复 40% 生命）';
+                this.showMap();
+            }
         } else {
             this.showMap();
         }
@@ -694,8 +700,9 @@ export class GameMain extends Component {
         }
         const t = def ? (this.save.trials || {})[def.id] : null;
         mkLabel(root, run ? (victory
-            ? '骰命魔龙的骰子归于沉寂。带回金币 ' + run.gold
-            : def.name + ' 止步于第 ' + (run.depth + 1) + ' 个节点，带回金币 ' + run.gold) : '',
+            ? '四关全破，骰命魔龙的骰子归于沉寂。带回金币 ' + run.gold
+            : def.name + ' 止步于第 ' + (run.stage + 1) + ' 关第 ' + (run.posRow + 1)
+                + ' 个节点，带回金币 ' + run.gold) : '',
             18, COL.text, 0, -20);
         if (t) {
             mkLabel(root, '该英雄远征战绩：' + t.clears + '/' + t.runs + ' 通关（' +

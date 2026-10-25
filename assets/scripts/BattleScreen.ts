@@ -94,9 +94,11 @@ export class BattleScreen extends Component {
         this.enemyHpText = mkLabel(root, '', 15, COL.text, 0, 578);
         this.intentPanel = mkPanel(root, 170, 34, EX, 520, COL.panel, 8, COL.border, 2).node;
         this.intentLabel = mkLabel(root, '', 16, COL.text, EX, 520);
-        this.enemyRig = buildRig(root, enemy.id, ENEMY_SIZE[enemy.id] || 130, EX, EY, true);
+        const vid = enemy.visual || enemy.id;
+        const vsize = ENEMY_SIZE[vid] || 130;
+        this.enemyRig = buildRig(root, vid, enemy.boss ? vsize * 1.3 : vsize, EX, EY, true);
         rigIdle(this.enemyRig);
-        this.enemyStatus = mkLabel(root, '', 14, COL.dim, EX, EY - (ENEMY_SIZE[enemy.id] || 130) / 2 - 14);
+        this.enemyStatus = mkLabel(root, '', 14, COL.dim, EX, EY - (enemy.boss ? vsize * 1.3 : vsize) / 2 - 14);
 
         this.heroRig = buildRig(root, this.core.hero.def.id, 130, HX, HY);
         rigIdle(this.heroRig);
@@ -407,7 +409,7 @@ export class BattleScreen extends Component {
         if (res.enragedNow) {
             this.scheduleOnce(() => {
                 enrage(this.enemyRig);
-                floatText(layer, '魔龙狂暴！力量+' + RULES.bossEnrageStr, ePos.x - 30, ePos.y + 70, COL.red, 26);
+                floatText(layer, this.core.enemy.name + '狂暴！力量+' + RULES.bossEnrageStr, ePos.x - 30, ePos.y + 70, COL.red, 26);
             }, t);
             t += 0.7;
         }
