@@ -43,7 +43,7 @@ function fight(hero: HeroInst, deck: string[], enemy: EnemyDef, buffs: RunBuffs,
 }
 
 // 每关典型路线：5 个节点 + 首领（与地图生成的平均构成接近）
-const STAGE_ROUTE = ['battle', 'battle', 'event', 'elite', 'rest', 'boss'];
+const STAGE_ROUTE = ['battle', 'battle', 'battle', 'elite', 'rest', 'boss'];
 
 interface RunOut { cleared: boolean; depth: number; diedAt: string; deck: number; }
 

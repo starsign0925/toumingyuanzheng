@@ -214,22 +214,26 @@ export class GameMain extends Component {
     }
 
     private genMap(): MapNode[][] {
-        // 加权池：怪物为主（战斗 61% + 精英 17%），奇遇稀有（~4%）
-        const KINDS: [NodeKind, number][] = [
-            ['battle', 7], ['elite', 2], ['treasure', 1], ['event', 0.5], ['rest', 1],
-        ];
-        const totalW = KINDS.reduce((s, k) => s + k[1], 0);
-        const pick = (): NodeKind => {
-            let r = Math.random() * totalW;
-            for (const k of KINDS) { r -= k[1]; if (r <= 0) { return k[0]; } }
-            return 'battle';
-        };
         // 三条路线：各自独立的槽位走廊（互不重叠），行间默认只沿本线前进
         const LANES: number[][] = [[0, 0.5], [1.5, 2], [2.5, 3]];
+        // 每条线构成一致：3 战斗 + 1 精英 + 1 特殊（宝箱/奇遇/营火各一条线随机分得）
+        const specials: NodeKind[] = ['treasure', 'event', 'rest'];
+        for (let i = specials.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            const t = specials[i]; specials[i] = specials[j]; specials[j] = t;
+        }
+        const laneKinds: NodeKind[][] = LANES.map((_, l) => {
+            const kinds: NodeKind[] = ['battle', 'battle', 'battle', 'elite', specials[l]];
+            for (let i = kinds.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                const t = kinds[i]; kinds[i] = kinds[j]; kinds[j] = t;
+            }
+            return kinds;
+        });
         const map: MapNode[][] = [];
         for (let r = 0; r < 5; r++) {
-            map.push(LANES.map((slots) => ({
-                kind: pick(),
+            map.push(LANES.map((slots, l) => ({
+                kind: laneKinds[l][r],
                 slot: slots[Math.floor(Math.random() * slots.length)],
                 links: [],
                 done: false,
