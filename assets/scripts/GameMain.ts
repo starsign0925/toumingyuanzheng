@@ -385,16 +385,32 @@ export class GameMain extends Component {
         });
         mkLabel(root, '点击发光节点前进，走过无法回头', 12, COL.dim, 160, -600);
 
-        // 地图容器（每关一种底色 + 关卡名）
+        // 地图容器：层次化关卡底色（主色 + 顶部柔光 + 底部暗角 + 走廊暗示 + 铜边）
         const mapRoot = mkNode(root, 'map', 0, 0, 0, -40);
         const st = STAGES[run.stage];
         const bg = mkNode(mapRoot, 'bands', 620, 640, 0, 0).addComponent(Graphics);
-        bg.fillColor = new Color(st.color[0], st.color[1], st.color[2], 255);
+        const c = st.color;
+        bg.fillColor = new Color(c[0] + 12, c[1] + 12, c[2] + 12, 255);
         bg.roundRect(-310, -306, 620, 560, 18);
         bg.fill();
+        bg.fillColor = new Color(c[0], c[1], c[2], 235);
+        bg.roundRect(-308, -186, 616, 438, 14);
+        bg.fill();
+        bg.fillColor = new Color(10, 8, 6, 100);
+        bg.roundRect(-308, -306, 616, 130, 14);
+        bg.fill();
+        bg.fillColor = new Color(12, 10, 8, 80);
+        for (const b of [[-280, -122], [-40, 118], [120, 280]]) {
+            bg.roundRect(b[0], -292, b[1] - b[0], 536, 14);
+            bg.fill();
+        }
         bg.fillColor = new Color(255, 255, 255, 70);
         for (const d of run.deco) { bg.circle(d.x * 0.9, d.y - 40, d.r); bg.fill(); }
         for (const o of this.stageOrn(run.stage)) { this.drawOrn(bg, run.stage, o.x, o.y, o.s, o.k); }
+        bg.strokeColor = new Color(166, 126, 66, 150);
+        bg.lineWidth = 3;
+        bg.roundRect(-310, -306, 620, 560, 18);
+        bg.stroke();
         mkLabel(mapRoot, '第 ' + (run.stage + 1) + ' 关 · ' + st.name,
             19, new Color(226, 210, 180, 255), 218, 232);
 
