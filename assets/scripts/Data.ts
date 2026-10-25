@@ -272,7 +272,7 @@ export const RULES = {
     handSize: 5,
     maxDice: 6,
     maxHand: 8,
-    recruitCost: 100,
+    recruitCost: 200,
     bossEnrageAt: 0.5,
     bossEnrageStr: 3,
     shadowOddBonus: 2,

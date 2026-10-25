@@ -217,11 +217,34 @@ export class GameMain extends Component {
 
     private onRecruit() {
         const pool = HEROES.filter((h) => this.save.owned.indexOf(h.id) < 0);
-        if (pool.length === 0 || this.save.gold < RULES.recruitCost) { return; }
-        this.save.gold -= RULES.recruitCost;
-        const got = pool[Math.floor(Math.random() * pool.length)];
-        this.save.owned.push(got.id);
-        this.store();
+        if (pool.length === 0) { this.mapMsg = '全员已集结'; this.showHome(); return; }
+        const ov = mkPanel(this.node, 560, 720, 0, 0, COL.panelLight, 12, COL.gold, 3);
+        ov.node.addComponent(BlockInputEvents);
+        popIn(ov.node, 0.35, 0.4, 1.1);
+        mkLabel(ov.node, '招募英雄 · ' + RULES.recruitCost + ' 金币/位', 22, COL.gold, 0, 322);
+        mkLabel(ov.node, '现有金币 ' + this.save.gold, 14, COL.dim, 0, 294);
+        for (let i = 0; i < pool.length; i++) {
+            const def = pool[i];
+            const y = 226 - i * 108;
+            mkPanel(ov.node, 500, 96, 0, y, COL.panel, 8, COL.border, 1.5);
+            const r = buildRig(ov.node, def.id, 60, -195, y - 4);
+            rigIdle(r, i * 0.1);
+            mkLabel(ov.node, def.name + '·' + def.title + ' HP' + def.maxHp, 16, COL.text, -60, y + 22);
+            mkLabel(ov.node, def.passive, 11, COL.dim, -60, y - 8, 290);
+            const bb = mkButton(ov.node, RULES.recruitCost + ' 金币招募', 130, 40, 185, y - 22, 14, () => {
+                if (this.save.gold < RULES.recruitCost) { return; }
+                this.save.gold -= RULES.recruitCost;
+                this.save.owned.push(def.id);
+                this.store();
+                ov.node.destroy();
+                this.recruitDone(def);
+            });
+            setBtnEnabled(bb, this.save.gold >= RULES.recruitCost, 130, 40);
+        }
+        mkButton(ov.node, '算了', 120, 44, 0, -332, 15, () => ov.node.destroy());
+    }
+
+    private recruitDone(got: { id: string; name: string; title: string; passive: string }) {
         const overlay = mkPanel(this.node, 440, 360, 0, 0, COL.panelLight, 12, COL.gold, 3);
         popIn(overlay.node, 0.35, 0.4, 1.12);
         mkLabel(overlay.node, '招募成功！', 26, COL.gold, 0, 150);
@@ -425,7 +448,7 @@ export class GameMain extends Component {
         mkLabel(root, '金币 ' + run.gold + '　牌组 ' + run.deck.length + '　进度 ' + run.depth, 14, COL.text, 160, 575);
         if (this.mapMsg) { mkLabel(root, this.mapMsg, 14, COL.gold, 0, 545); }
         mkLabel(root, '牌组内容：' + run.deck.map((c) => cardById(c).name).join(' '), 11, COL.dim, 0, -545, 660);
-        mkButton(root, '撤退(保留金币)', 190, 46, -250, -600, 16, () => {
+        mkButton(root, '撤退', 190, 46, -250, -600, 16, () => {
             this.finishRun(false);
             this.showHome();
         });
@@ -625,7 +648,7 @@ export class GameMain extends Component {
     private finishRun(cleared: boolean) {
         const run = this.run;
         if (!run) { return; }
-        this.save.gold += run.gold;
+        if (cleared) { this.save.gold += run.gold; } // 只有通关才结算金币
         if (!this.save.trials) { this.save.trials = {}; }
         const id = run.hero.def.id;
         const t = this.save.trials[id] || { runs: 0, clears: 0 };
