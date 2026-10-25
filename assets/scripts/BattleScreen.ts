@@ -184,19 +184,6 @@ export class BattleScreen extends Component {
             .call(() => n.destroy()).start();
     }
 
-    /** 全屏闪光（重击/击杀/狂暴等瞬间反馈）。 */
-    private flash(color: Color, peak = 60, dur = 0.3) {
-        const f = mkNode(this.node, 'flash', 720, 1280, 0, 0);
-        const g = f.addComponent(Graphics);
-        g.fillColor = color;
-        g.rect(-360, -640, 720, 1280);
-        g.fill();
-        const op = f.addComponent(UIOpacity);
-        op.opacity = 0;
-        tween(op).to(0.07, { opacity: peak }).to(dur, { opacity: 0 })
-            .call(() => f.destroy()).start();
-    }
-
     /** 上升光点（治疗/中毒/增益粒子）。 */
     private sparkle(pos: Vec3, color: Color, n = 6) {
         for (let i = 0; i < n; i++) {
@@ -276,7 +263,6 @@ export class BattleScreen extends Component {
             this.scheduleOnce(() => {
                 hurt(this.enemyRig, Math.min(1.4, 0.7 + hh / 25));
                 shake(this.node, hh >= 14 ? 6 : 3);
-                if (hh >= 14) { this.flash(new Color(255, 240, 210, 255), 55, 0.25); }
                 floatText(this.node, '-' + hh, enemyPos.x, enemyTop, COL.red, hh >= 14 ? 36 : 28);
             }, t);
             t += 0.16;
@@ -357,7 +343,6 @@ export class BattleScreen extends Component {
         die(this.enemyRig);
         const c = centerOf(this.enemyRig, this.node);
         burst(this.node, c, COL.gold, 14, 80);
-        this.flash(new Color(255, 220, 120, 255), 60, 0.45);
         this.banner('胜 利');
         floatText(this.node, '击败！', c.x, c.y, COL.gold, 32);
         this.scheduleOnce(() => this.onEnd(true, this.core.rollGold()), 1.1);
@@ -435,9 +420,6 @@ export class BattleScreen extends Component {
         if (res.hits.length > 0) {
             lines.push('攻击 ' + res.hits.map((h) => h.real).join('+') + (res.hits.some((h) => h.real < h.raw) ? '(被护甲抵挡)' : ''));
             const impact = 0.5;
-            if (res.hits.some((h) => h.raw >= 12)) {
-                this.scheduleOnce(() => this.flash(new Color(210, 50, 40, 255), 70, 0.35), t);
-            }
             this.scheduleOnce(() => {
                 enemyAttack(this.enemyRig, layer, hPos);
             }, t);

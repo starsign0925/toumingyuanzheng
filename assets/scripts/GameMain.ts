@@ -214,9 +214,16 @@ export class GameMain extends Component {
     }
 
     private genMap(): MapNode[][] {
-        const pool: NodeKind[] = ['battle', 'battle', 'battle', 'battle',
-            'elite', 'elite', 'treasure', 'event', 'rest'];
-        const pick = () => pool[Math.floor(Math.random() * pool.length)];
+        // 加权池：怪物为主（战斗 61% + 精英 17%），奇遇稀有（~4%）
+        const KINDS: [NodeKind, number][] = [
+            ['battle', 7], ['elite', 2], ['treasure', 1], ['event', 0.5], ['rest', 1],
+        ];
+        const totalW = KINDS.reduce((s, k) => s + k[1], 0);
+        const pick = (): NodeKind => {
+            let r = Math.random() * totalW;
+            for (const k of KINDS) { r -= k[1]; if (r <= 0) { return k[0]; } }
+            return 'battle';
+        };
         // 三条路线：各自独立的槽位走廊（互不重叠），行间默认只沿本线前进
         const LANES: number[][] = [[0, 0.5], [1.5, 2], [2.5, 3]];
         const map: MapNode[][] = [];
