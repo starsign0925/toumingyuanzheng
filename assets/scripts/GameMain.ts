@@ -273,7 +273,17 @@ export class GameMain extends Component {
         this.mapBusy = true;
         const nd = this.run.map[r][col];
         const dst = new Vec3(this.slotX(nd.slot), this.rowY(r) + 30, 0);
-        tween(this.marker).to(0.45, { position: dst }).call(() => {
+        const from = this.marker.position.clone();
+        const st = { t: 0 };
+        tween(st).to(0.55, { t: 1 }, {
+            onUpdate: (_o?: unknown, k?: number) => {
+                const kk = k === undefined ? st.t : k;
+                const hk = (kk * 2) % 1;
+                const y = Math.sin(Math.PI * hk) * 34 * (1 - kk * 0.35);
+                this.marker.setPosition(from.x + (dst.x - from.x) * kk,
+                    from.y + (dst.y - from.y) * kk + y, 0);
+            },
+        }).call(() => {
             this.run.posRow = r;
             this.run.posCol = col;
             this.enterNode(nd.kind);

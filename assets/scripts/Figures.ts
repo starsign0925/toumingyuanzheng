@@ -693,13 +693,24 @@ function shoot(layer: Node, from: Vec3, to: Vec3, kind: ProjKind, dur: number, c
     const dx = to.x - from.x, dy = to.y - from.y;
     if (kind === 'knife' || kind === 'wave') { n.angle = Math.atan2(dy, dx) * 180 / Math.PI; }
     const arc = opt.arc || 0, spin = opt.spin || 0;
-    const st = { t: 0 };
+    const st = { t: 0, ghost: 0 };
     tween(st).delay(opt.delay || 0).call(() => { n.active = true; })
         .to(dur, { t: 1 }, {
             onUpdate: (_o?: unknown, r?: number) => {
                 const k = r === undefined ? st.t : r;
                 n.setPosition(from.x + dx * k, from.y + dy * k + arc * 4 * k * (1 - k), 0);
                 if (spin) { n.angle = spin * k; }
+                if (st.ghost < 2 && k >= 0.35 + st.ghost * 0.3) {
+                    st.ghost++;
+                    const gp = mkNode(layer, 'ghost', 4, 4, n.position.x, n.position.y);
+                    const gg = gp.addComponent(Graphics);
+                    gg.fillColor = color;
+                    gg.circle(0, 0, 4.5 - st.ghost * 1.3);
+                    gg.fill();
+                    const gop = gp.addComponent(UIOpacity);
+                    gop.opacity = 130;
+                    tween(gop).to(0.24, { opacity: 0 }).call(() => gp.destroy()).start();
+                }
             },
         })
         .call(() => { burst(layer, to, color); n.destroy(); })

@@ -1,5 +1,5 @@
 // 骰命远征 —— 战斗界面（竖屏：骰子 × 卡牌，杀戮尖塔式意图）
-import { _decorator, Component, Node, Label, Graphics, Color, EventTouch, tween, Vec3, UIOpacity } from 'cc';
+import { _decorator, Component, Node, Label, Graphics, Color, EventTouch, tween, Tween, Vec3, UIOpacity } from 'cc';
 import { RULES, cardById, slotOk } from './Data';
 import type { EnemyDef, HeroInst, RunBuffs, BattleEntry } from './Data';
 import { BattleCore } from './BattleCore';
@@ -129,19 +129,87 @@ export class BattleScreen extends Component {
         this.selDie = null;
         this.selCard = null;
         this.refresh();
-        // 骰子入场翻滚 + 手牌弹入
-        this.diceNode.children.forEach((d, i) => {
-            d.setScale(0.2, 0.2, 1);
-            d.angle = (Math.random() - 0.5) * 160;
-            tween(d).delay(i * 0.05).to(0.16, { scale: new Vec3(1.2, 1.2, 1), angle: 0 })
-                .to(0.1, { scale: Vec3.ONE }).start();
-        });
+        this.rollDiceIn();
+        this.banner('回合 ' + this.core.round, COL.gold);
+        // 手牌弹入
         this.handNode.children.forEach((c, i) => {
             c.setScale(0.4, 0.4, 1);
             tween(c).delay(0.15 + i * 0.06).to(0.18, { scale: new Vec3(1.1, 1.1, 1) })
                 .to(0.1, { scale: Vec3.ONE }).start();
         });
         if (this.auto) { this.scheduleOnce(() => this.autoStep(), 0.6); }
+    }
+
+    /** 骰子入场：点数快速翻动 + 摇摆，逐颗落定回弹。 */
+    private rollDiceIn() {
+        const kids = this.diceNode.children.slice();
+        if (!kids.length) { return; }
+        const settled = new Set<number>();
+        let tick = 0;
+        const rollTick = () => {
+            tick++;
+            kids.forEach((n, i) => {
+                if (!n.isValid || settled.has(i)) { return; }
+                const g = n.getComponent(Graphics);
+                const settleAt = 4 + i * 2;
+                if (tick < settleAt) {
+                    drawDie(g, DIE_SIZE, { value: 1 + Math.floor(Math.random() * 6) });
+                    n.angle = (Math.random() - 0.5) * 30;
+                    return;
+                }
+                settled.add(i);
+                n.angle = 0;
+                const d = this.core.dice[i];
+                if (d) { drawDie(g, DIE_SIZE, { value: d.value, sel: this.selDie === d }); }
+                tween(n).to(0.1, { scale: new Vec3(1.22, 1.22, 1) })
+                    .to(0.12, { scale: Vec3.ONE }, { easing: 'backOut' }).start();
+            });
+            if (tick >= 4 + (kids.length - 1) * 2) { this.unschedule(rollTick); }
+        };
+        this.schedule(rollTick, 0.08);
+    }
+
+    /** 回合横幅：中央弹入停留后淡出。 */
+    private banner(text: string, color: Color = COL.gold) {
+        const l = mkLabel(this.node, text, 42, color, 0, 300);
+        const n = l.node;
+        const op = n.addComponent(UIOpacity);
+        op.opacity = 0;
+        n.setScale(0.6, 0.6, 1);
+        tween(n).to(0.16, { scale: new Vec3(1.08, 1.08, 1) }, { easing: 'backOut' })
+            .to(0.08, { scale: Vec3.ONE }).start();
+        tween(op).to(0.14, { opacity: 255 }).delay(0.55).to(0.3, { opacity: 0 })
+            .call(() => n.destroy()).start();
+    }
+
+    /** 全屏闪光（重击/击杀/狂暴等瞬间反馈）。 */
+    private flash(color: Color, peak = 60, dur = 0.3) {
+        const f = mkNode(this.node, 'flash', 720, 1280, 0, 0);
+        const g = f.addComponent(Graphics);
+        g.fillColor = color;
+        g.rect(-360, -640, 720, 1280);
+        g.fill();
+        const op = f.addComponent(UIOpacity);
+        op.opacity = 0;
+        tween(op).to(0.07, { opacity: peak }).to(dur, { opacity: 0 })
+            .call(() => f.destroy()).start();
+    }
+
+    /** 上升光点（治疗/中毒/增益粒子）。 */
+    private sparkle(pos: Vec3, color: Color, n = 6) {
+        for (let i = 0; i < n; i++) {
+            const p = mkNode(this.node, 'sparkle', 4, 4,
+                pos.x + (Math.random() - 0.5) * 56, pos.y - 30 + Math.random() * 20);
+            const g = p.addComponent(Graphics);
+            g.fillColor = color;
+            g.circle(0, 0, 2.5 + Math.random() * 3);
+            g.fill();
+            const op = p.addComponent(UIOpacity);
+            tween(p).by(0.7 + Math.random() * 0.2,
+                { position: new Vec3((Math.random() - 0.5) * 20, 70 + Math.random() * 40, 0) },
+                { easing: 'sineOut' }).start();
+            tween(op).delay(0.35).to(0.35, { opacity: 0 }).call(() => p.destroy()).start();
+        }
     }
 
     private autoStep() {
@@ -206,6 +274,7 @@ export class BattleScreen extends Component {
             this.scheduleOnce(() => {
                 hurt(this.enemyRig, Math.min(1.4, 0.7 + hh / 25));
                 shake(this.node, hh >= 14 ? 6 : 3);
+                if (hh >= 14) { this.flash(new Color(255, 240, 210, 255), 55, 0.25); }
                 floatText(this.node, '-' + hh, enemyPos.x, enemyTop, COL.red, hh >= 14 ? 36 : 28);
             }, t);
             t += 0.16;
@@ -214,7 +283,10 @@ export class BattleScreen extends Component {
             this.scheduleOnce(() => floatText(this.node, '+' + r.block + ' 护甲', heroPos.x, heroPos.y + 60, COL.blue, 24), 0.3);
         }
         if (r.heal > 0) {
-            this.scheduleOnce(() => floatText(this.node, '+' + r.heal, heroPos.x, heroPos.y + 88, COL.green, 24), 0.4);
+            this.scheduleOnce(() => {
+                floatText(this.node, '+' + r.heal, heroPos.x, heroPos.y + 88, COL.green, 24);
+                this.sparkle(heroPos, new Color(140, 235, 140, 255), 6);
+            }, 0.4);
         }
         if (r.poison > 0) {
             this.scheduleOnce(() => floatText(this.node, '中毒 +' + r.poison, enemyPos.x, enemyTop + 36, new Color(120, 220, 110, 255), 22), 0.4);
@@ -282,6 +354,9 @@ export class BattleScreen extends Component {
         this.busy = true;
         die(this.enemyRig);
         const c = centerOf(this.enemyRig, this.node);
+        burst(this.node, c, COL.gold, 14, 80);
+        this.flash(new Color(255, 220, 120, 255), 60, 0.45);
+        this.banner('胜 利');
         floatText(this.node, '击败！', c.x, c.y, COL.gold, 32);
         this.scheduleOnce(() => this.onEnd(true, this.core.rollGold()), 1.1);
     }
@@ -289,7 +364,20 @@ export class BattleScreen extends Component {
     private onEndTurn() {
         if (this.busy) { return; }
         this.busy = true;
-        this.refresh();
+        // 弃牌下滑淡出 + 骰子收缩消散
+        this.handNode.children.forEach((c, i) => {
+            const p = c.position.clone();
+            tween(c).delay(i * 0.03)
+                .to(0.24, { position: new Vec3(p.x, p.y - 90, 0), angle: -10 },
+                    { easing: 'quadIn' }).start();
+            const op = c.getComponent(UIOpacity) || c.addComponent(UIOpacity);
+            tween(op).delay(i * 0.03).to(0.24, { opacity: 0 }).start();
+        });
+        this.diceNode.children.forEach((d, i) => {
+            tween(d).delay(i * 0.02)
+                .to(0.2, { scale: new Vec3(0.01, 0.01, 1), angle: 60 }).start();
+        });
+        this.scheduleOnce(() => this.refresh(), 0.3);
         const res = this.core.endTurn();
         this.enemyPhase(res);
     }
@@ -300,11 +388,13 @@ export class BattleScreen extends Component {
         const hPos = centerOf(this.heroRig, layer);
         const lines: string[] = [];
         let t = 0;
+        this.banner('敌方回合', new Color(230, 120, 90, 255));
 
         if (res.poisonDmg > 0) {
             lines.push('中毒 -' + res.poisonDmg);
             this.scheduleOnce(() => {
                 floatText(layer, '毒 -' + res.poisonDmg, ePos.x, ePos.y + this.enemyRig.size / 2, new Color(120, 220, 110, 255), 24);
+                this.sparkle(ePos, new Color(120, 220, 110, 255), 6);
             }, t);
             t += 0.35;
         }
@@ -343,6 +433,9 @@ export class BattleScreen extends Component {
         if (res.hits.length > 0) {
             lines.push('攻击 ' + res.hits.map((h) => h.real).join('+') + (res.hits.some((h) => h.real < h.raw) ? '(被护甲抵挡)' : ''));
             const impact = 0.5;
+            if (res.hits.some((h) => h.raw >= 12)) {
+                this.scheduleOnce(() => this.flash(new Color(210, 50, 40, 255), 70, 0.35), t);
+            }
             this.scheduleOnce(() => {
                 enemyAttack(this.enemyRig, layer, hPos);
             }, t);
@@ -392,6 +485,14 @@ export class BattleScreen extends Component {
         else if (it.type === 'curse') { chip = '诅咒 -1骰'; chipCol = new Color(100, 56, 120, 255); }
         this.intentLabel.string = chip;
         drawPanel(this.intentPanel.getComponent(Graphics), 170, 34, chipCol, 8, COL.border, 2);
+        // 大额攻击意图：徽章持续脉动预警
+        Tween.stopAllByTarget(this.intentPanel);
+        this.intentPanel.setScale(1, 1, 1);
+        if (!this.busy && idmg.dmg * idmg.hits >= 12) {
+            tween(this.intentPanel).repeatForever(
+                tween(this.intentPanel).to(0.32, { scale: new Vec3(1.12, 1.12, 1) })
+                    .to(0.32, { scale: Vec3.ONE })).start();
+        }
         const est: string[] = [];
         if (core.enemyBlock > 0) { est.push('护甲 ' + core.enemyBlock); }
         if (core.poison > 0) { est.push('毒 ' + core.poison); }
