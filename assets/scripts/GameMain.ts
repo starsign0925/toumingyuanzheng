@@ -1,5 +1,5 @@
 // 烽火长歌 —— 入口组件（竖屏）：营地四选三 / 区域冒险地图 / 战斗 / 探索检定 / 战利品 / 结算
-import { _decorator, Component, Node, Graphics, sys, Color, tween, Vec3, UIOpacity, HorizontalTextAlignment } from 'cc';
+import { _decorator, Component, Node, Graphics, sys, Color, tween, Vec3, UIOpacity, UITransform, HorizontalTextAlignment } from 'cc';
 import {
     HEROES, STAGES, EVENTS, RULES, PROF, ATTR_NAME, NODE_NAME, COLUMN_X,
     heroById, makeHero, partyNote, encounter, rewardOptions, rewardText, applyReward, weaponName, weaponById,
@@ -16,13 +16,53 @@ const { ccclass } = _decorator;
 const SAVE_KEY = 'fhcg_save_v1';
 const CIRCLED = ['①', '②', '③'];
 
+// 2.5D 地图（饥荒式）：透视相机固定俯角、跟随领队；节点/角色为正对屏幕的纸片立牌
+const ROW_GAP = 300;          // 相邻两行据点的纵深距离（世界单位）
+const LANE_K = 0.8;           // 横向槽位缩放
+const CAM_PITCH = 50 * Math.PI / 180;
+const CAM_SIN = Math.sin(CAM_PITCH), CAM_COS = Math.cos(CAM_PITCH);
+const CAM_R = 700;            // 相机到注视点距离：越小透视越强
+const CAM_F = CAM_R * 1.5;    // 焦距：注视点处 1 世界单位 = 1.5px（视野远近）
+const FOCUS_Y = -170;         // 注视点（领队）在屏幕上的 y
+const CAM_LAG = 5;            // 相机跟随速度
+const NEAR_DEPTH = 220;       // 近裁剪
+const FADE_Z0 = ROW_GAP * 1.7, FADE_Z1 = ROW_GAP * 3.2; // 远处立牌淡出区间（相对相机）
+const GROUND_X = 720, GROUND_Z0 = -ROW_GAP * 1.6, GROUND_Z1 = ROW_GAP * 6.8;
+const SLAB = 26;              // 地台前沿厚度
+const SHADOW_DX = 0.35, SHADOW_DZ = 0.5; // 斜投影方向（每单位高度）
+const NODE_K = 1, MARKER_K = 1, ORN_K = 1.6;
+const START = { x: 0, z: -ROW_GAP * 0.9 };
+const ORN_BASE = [0.9, 0.3, 0.45, 0.4]; // 各区装饰物底部相对 s 的偏移，使其立在地面上
+const PAPER_T = 5;            // 纸板厚度（侧面错位）
+const PAPER = new Color(236, 226, 202, 255);
+const PAPER_DIM = new Color(150, 140, 122, 255);
+const PAPER_SHADE = new Color(204, 192, 166, 255);
+const PAPER_EDGE = new Color(120, 100, 78, 255);
+const PAPER_DARK = new Color(70, 56, 42, 255);
+
+interface Standee {
+    root: Node; card: Node; op: UIOpacity;
+    x: number; z: number; k: number; w: number; h: number;
+    flap: boolean; dim: number; ring: boolean;
+}
+interface MapPath { ax: number; az: number; bx: number; bz: number; used: boolean; w: number }
+interface MapTurf { x: number; z: number; rx: number; rz: number; light: boolean }
+interface MapView {
+    ground: Graphics; stand: Node; items: Standee[]; paths: MapPath[]; turf: MapTurf[];
+    cam: { x: number; z: number }; dirty: boolean; stage: number;
+}
+
 @ccclass('GameMain')
 export class GameMain extends Component {
     private save: SaveData = { gold: 0, trials: {} };
     private run: RunState = null;
     private picks: string[] = ['pei', 'shen', 'ye'];
     private mapMsg = '';
-    private marker: Node = null;
+    private view: MapView = null;
+    private marker: Standee = null;
+    private markerFace = 1;
+    private markerHop = 0;
+    private markerW = { x: START.x, z: START.z };
     private mapBusy = false;
 
     onLoad() {
@@ -90,6 +130,7 @@ export class GameMain extends Component {
     }
 
     private clearScreen(): Node {
+        this.view = null;
         this.node.removeAllChildren();
         return mkPanel(this.node, 720, 1280, 0, 0, COL.bg, 0, null, 0).node;
     }
@@ -213,10 +254,6 @@ export class GameMain extends Component {
         return f === c ? COLUMN_X[f] : (COLUMN_X[f] + COLUMN_X[c]) / 2;
     }
 
-    private rowY(r: number): number {
-        return -280 + r * 104;
-    }
-
     private reachable(r: number, i: number): boolean {
         const run = this.run;
         if (r !== run.posRow + 1) { return false; }
@@ -228,38 +265,37 @@ export class GameMain extends Component {
         if (this.mapBusy || !this.reachable(r, col)) { return; }
         this.mapBusy = true;
         const nd = this.run.map[r][col];
-        const dst = new Vec3(this.slotX(nd.slot), this.rowY(r) + 30, 0);
-        const from = this.marker.position.clone();
+        const from = { x: this.markerW.x, z: this.markerW.z };
+        const dst = this.markerSpot(nd.slot, r);
+        const mk = this.marker, card = mk.card;
+        // 纸片转身：横向压扁再展开
+        const face = Math.abs(dst.x - from.x) < 4 ? this.markerFace : dst.x < from.x ? -1 : 1;
+        if (face !== this.markerFace) {
+            this.markerFace = face;
+            tween(card).to(0.12, { scale: new Vec3(0.04, 1, 1) }).to(0.12, { scale: new Vec3(face, 1, 1) }).start();
+        }
         const st = { t: 0 };
-        tween(st).to(0.55, { t: 1 }, {
+        tween(st).to(0.6, { t: 1 }, {
             onUpdate: (_o?: unknown, k?: number) => {
                 const kk = k === undefined ? st.t : k;
                 const hk = (kk * 2) % 1;
-                const y = Math.sin(Math.PI * hk) * 34 * (1 - kk * 0.35);
-                this.marker.setPosition(from.x + (dst.x - from.x) * kk, from.y + (dst.y - from.y) * kk + y, 0);
+                mk.x = from.x + (dst.x - from.x) * kk;
+                mk.z = from.z + (dst.z - from.z) * kk;
+                this.markerW = { x: mk.x, z: mk.z };
+                // 立牌跳起、影子留在地面；行走时纸片轻晃；相机在 update 中跟随
+                this.markerHop = Math.sin(Math.PI * hk) * 30 * (1 - kk * 0.35);
+                card.setPosition(0, this.markerHop, 0);
+                card.angle = Math.sin(kk * Math.PI * 4) * 5;
+                this.view.dirty = true;
             },
         }).call(() => {
+            card.angle = 0;
+            card.setPosition(0, 0, 0);
+            this.markerHop = 0;
             this.run.posRow = r;
             this.run.posCol = col;
             this.enterNode(nd.kind);
         }).start();
-    }
-
-    /** 区域主题装饰物：种子随机撒布（同区布局固定），避开节点位置。 */
-    private stageOrn(stage: number): { x: number; y: number; s: number; k: number }[] {
-        let seed = stage * 7919 + 13;
-        const rnd = () => { seed = (seed * 48271) % 2147483647; return seed / 2147483647; };
-        const nodePts: { x: number; y: number }[] = [];
-        for (let r = 0; r < 6; r++) {
-            for (const s of [0, 0.5, 1.5, 2, 2.5, 3]) { nodePts.push({ x: this.slotX(s), y: this.rowY(r) }); }
-        }
-        const out: { x: number; y: number; s: number; k: number }[] = [];
-        for (let i = 0; i < 60 && out.length < 30; i++) {
-            const x = -290 + rnd() * 580, y = -290 + rnd() * 530;
-            if (nodePts.some((p) => Math.abs(p.x - x) < 62 && Math.abs(p.y - y) < 62)) { continue; }
-            out.push({ x, y, s: 9 + rnd() * 13, k: Math.floor(rnd() * 4) });
-        }
-        return out;
     }
 
     private drawOrn(g: Graphics, stage: number, x: number, y: number, s: number, k: number) {
@@ -319,51 +355,37 @@ export class GameMain extends Component {
         const root = this.clearScreen();
         const run = this.run;
         this.mapBusy = false;
+        this.markerHop = 0;
+        this.markerW = run.posRow < 0 ? { x: START.x, z: START.z }
+            : this.markerSpot(run.map[run.posRow][run.posCol].slot, run.posRow);
 
-        // 顶部：三名角色状态
-        run.party.forEach((h, i) => {
-            const x = -230 + i * 230;
-            mkLabel(root, h.def.name + '　' + Math.max(0, h.hp) + '/' + h.maxHp, 15, h.hp > 0 ? COL.gold : COL.red, x, 612);
-            mkBar(root, 190, 12, x, 590).set(h.hp / h.maxHp);
-            mkLabel(root, weaponName(h.weapon), 11.5, COL.dim, x, 572);
+        // 地图（饥荒式 2.5D：透视相机固定俯角、跟随领队，纸片立牌正对屏幕）
+        const mapRoot = mkNode(root, 'map', 720, 1280, 0, 0);
+        const ground = mkNode(mapRoot, 'ground', 0, 0, 0, 0).addComponent(Graphics);
+        const stand = mkNode(mapRoot, 'stand', 0, 0, 0, 0);
+        this.view = {
+            ground, stand, items: [], paths: this.buildPaths(), turf: this.buildTurf(run.stage),
+            cam: { x: this.markerW.x, z: this.markerW.z }, dirty: true, stage: run.stage,
+        };
+
+        this.buildOrnaments(run.stage).forEach((o) => {
+            const it = this.mkStandee('orn', o.x, o.z, o.s * 1.4, o.s * 2, ORN_K, false);
+            this.drawOrn(it.card.addComponent(Graphics), run.stage, 0, o.s * ORN_BASE[run.stage], o.s, o.k);
+            this.foldUp(it.card, 0.05 + Math.random() * 0.25);
+            const a = 1 + Math.random() * 1.5, d = 1.2 + Math.random() * 0.8;
+            tween(it.card).delay(0.4).repeatForever(tween(it.card).to(d, { angle: a }, { easing: 'sineInOut' })
+                .to(d, { angle: -a }, { easing: 'sineInOut' })).start();
         });
-        mkLabel(root, '钱 ' + run.gold + '　进度 ' + run.depth + '/24　' + STAGES[run.stage].name, 14, COL.text, 0, 546);
-        if (this.mapMsg) { mkLabel(root, this.mapMsg, 14, COL.gold, 0, 520, 680); }
-        mkButton(root, '撤退', 160, 46, -265, -600, 16, () => { this.finishRun(false); this.showHome(); });
-        mkLabel(root, '点击发光节点前进，走过无法回头；撤退不带回钱', 12, COL.dim, 90, -600);
-        mkLabel(root, '本章目标：' + STAGES[run.stage].goal, 13, COL.dim, 0, -545, 680);
 
-        // 地图
-        const mapRoot = mkNode(root, 'map', 0, 0, 0, -40);
-        const st = STAGES[run.stage];
-        const bg = mkNode(mapRoot, 'bands', 620, 640, 0, 0).addComponent(Graphics);
-        bg.fillColor = new Color(st.color[0], st.color[1], st.color[2], 255);
-        bg.roundRect(-310, -306, 620, 560, 18);
-        bg.fill();
-        bg.fillColor = new Color(255, 255, 255, 70);
-        for (const d of run.deco) { bg.circle(d.x * 0.9, d.y - 40, d.r); bg.fill(); }
-        for (const o of this.stageOrn(run.stage)) { this.drawOrn(bg, run.stage, o.x, o.y, o.s, o.k); }
-        mkLabel(mapRoot, '第 ' + (run.stage + 1) + ' 章 · ' + st.short, 19, new Color(226, 210, 180, 255), 218, 232);
-
-        const lg = mkNode(mapRoot, 'links', 0, 0, 0, 0).addComponent(Graphics);
-        for (let r = 0; r < run.map.length - 1; r++) {
-            const cur = run.map[r], nxt = run.map[r + 1];
-            for (let i = 0; i < cur.length; i++) {
-                for (const j of cur[i].links) {
-                    const used = cur[i].done && nxt[j].done;
-                    lg.lineWidth = used ? 5 : 3.5;
-                    lg.strokeColor = used ? COL.gold : new Color(110, 90, 70, 150);
-                    lg.moveTo(this.slotX(cur[i].slot), this.rowY(r));
-                    lg.lineTo(this.slotX(nxt[j].slot), this.rowY(r + 1));
-                    lg.stroke();
-                }
-            }
-        }
-        if (run.posRow < 0) {
-            lg.lineWidth = 3;
-            lg.strokeColor = new Color(110, 90, 70, 130);
-            for (const n of run.map[0]) { lg.moveTo(0, -360); lg.lineTo(this.slotX(n.slot), this.rowY(0)); lg.stroke(); }
-        }
+        // 出发路牌
+        const sign = this.mkStandee('start', START.x - 70, START.z - 30, 72, 60, 1, false);
+        const sg = sign.card.addComponent(Graphics);
+        sg.fillColor = new Color(70, 50, 34, 255);
+        sg.rect(-4, 0, 8, 34);
+        sg.fill();
+        this.drawPaperBoard(sg, -34, 26, 68, 30, 6, PAPER);
+        mkLabel(sign.card, '出 发', 15, new Color(90, 60, 36, 255), 0, 41);
+        this.foldUp(sign.card, 0.1);
 
         for (let r = 0; r < run.map.length; r++) {
             const row = run.map[r];
@@ -372,28 +394,350 @@ export class GameMain extends Component {
                 const state = nd.done ? 'done'
                     : (r === run.posRow && i === run.posCol) ? 'cur'
                         : this.reachable(r, i) ? 'next' : 'far';
-                const n = mkNode(mapRoot, 'n' + r + '_' + i, 60, 60, this.slotX(nd.slot), this.rowY(r));
-                this.drawMapNode(n.addComponent(Graphics), nd.kind, state);
-                if (state === 'far') { n.addComponent(UIOpacity).opacity = 95; }
+                const s = nd.kind === 'boss' ? 30 : 26;
+                const it = this.mkStandee('n' + r + '_' + i, this.laneX(nd.slot), this.rowZ(r), s * 2 + 18, s * 2 + 32, NODE_K, true);
+                it.ring = state === 'next' || state === 'cur';
+                it.dim = state === 'far' ? 0.55 : 1;
+                this.drawNodeCard(it.card, nd.kind, state, s);
+                this.foldUp(it.card, 0.1 + Math.max(0, r - run.posRow) * 0.08);
                 if (state === 'next') {
-                    tween(n).repeatForever(tween(n).to(0.55, { scale: new Vec3(1.12, 1.12, 1) }).to(0.55, { scale: Vec3.ONE })).start();
+                    tween(it.card).delay(0.5).repeatForever(tween(it.card).to(0.45, { position: new Vec3(0, 8, 0) }, { easing: 'sineOut' })
+                        .to(0.45, { position: Vec3.ZERO }, { easing: 'sineIn' })).start();
                     const rr = r, ii = i;
-                    n.on(Node.EventType.TOUCH_END, () => this.travelTo(rr, ii));
+                    it.card.on(Node.EventType.TOUCH_END, () => this.travelTo(rr, ii));
                 }
-                popIn(n, 0.28, 0.3, 1.1, r * 0.05);
-                mkLabel(n, NODE_NAME[nd.kind], 11.5, state === 'far' ? COL.dim : COL.text, 0, -38);
+                mkLabel(it.root, NODE_NAME[nd.kind], 13, state === 'far' ? COL.dim : COL.text, 0, -(s * 2 + 18) * 0.36 - 8);
             }
         }
 
-        // 队伍标记（领队）
-        this.marker = mkNode(mapRoot, 'marker', 54, 80, 0, 0);
-        rigIdle(buildRig(this.marker, run.party[0].def.visual, 68, 0, 0));
-        if (run.posRow < 0) {
-            this.marker.setPosition(0, -360, 0);
-            mkLabel(mapRoot, '▼ 出发', 14, COL.dim, 0, -396);
-        } else {
-            this.marker.setPosition(this.slotX(run.map[run.posRow][run.posCol].slot), this.rowY(run.posRow) + 30, 0);
+        // 队伍标记（领队）：纸板立牌
+        const mk = this.mkStandee('marker', this.markerW.x, this.markerW.z, 58, 86, MARKER_K, true);
+        this.marker = mk;
+        this.drawPaperBoard(mk.card.addComponent(Graphics), -29, 0, 58, 86, 12, PAPER);
+        rigIdle(buildRig(mk.card, run.party[0].def.visual, 68, 0, 34 + 9));
+        this.foldUp(mk.card, 0.35, this.markerFace);
+
+        // HUD（叠在场景上方）
+        const shade = new Color(20, 14, 10, 225);
+        mkPanel(root, 720, 150, 0, 565, shade, 0, null, 0);
+        mkPanel(root, 720, 28, 0, 476, new Color(20, 14, 10, 110), 0, null, 0);
+        mkPanel(root, 720, 130, 0, -575, shade, 0, null, 0);
+        mkPanel(root, 720, 28, 0, -496, new Color(20, 14, 10, 110), 0, null, 0);
+        run.party.forEach((h, i) => {
+            const x = -230 + i * 230;
+            mkLabel(root, h.def.name + '　' + Math.max(0, h.hp) + '/' + h.maxHp, 15, h.hp > 0 ? COL.gold : COL.red, x, 612);
+            mkBar(root, 190, 12, x, 590).set(h.hp / h.maxHp);
+            mkLabel(root, weaponName(h.weapon), 11.5, COL.dim, x, 572);
+        });
+        const st = STAGES[run.stage];
+        mkLabel(root, '钱 ' + run.gold + '　进度 ' + run.depth + '/24　' + st.name, 14, COL.text, 0, 546);
+        if (this.mapMsg) { mkLabel(root, this.mapMsg, 14, COL.gold, 0, 520, 680); }
+        mkLabel(root, '第 ' + (run.stage + 1) + ' 章 · ' + st.short, 19, new Color(226, 210, 180, 255), 250, 466);
+        mkButton(root, '撤退', 160, 46, -265, -600, 16, () => { this.finishRun(false); this.showHome(); });
+        mkLabel(root, '点击发光节点前进，走过无法回头；撤退不带回钱', 12, COL.dim, 90, -600);
+        mkLabel(root, '本章目标：' + st.goal, 13, COL.dim, 0, -545, 680);
+
+        this.layoutMap();
+    }
+
+    update(dt: number) {
+        const v = this.view;
+        if (!v || !v.ground.isValid) { return; }
+        const t = this.markerW, k = Math.min(1, dt * CAM_LAG);
+        const dx = t.x - v.cam.x, dz = t.z - v.cam.z;
+        if (!v.dirty && Math.abs(dx) < 0.05 && Math.abs(dz) < 0.05) { return; }
+        v.cam.x += dx * k;
+        v.cam.z += dz * k;
+        v.dirty = false;
+        this.layoutMap();
+    }
+
+    // ---------------- 2.5D 地图辅助 ----------------
+
+    private laneX(slot: number): number {
+        return this.slotX(slot) * LANE_K;
+    }
+
+    private rowZ(r: number): number {
+        return r * ROW_GAP;
+    }
+
+    /** 领队站位：节点右前方，避免遮住节点图案。 */
+    private markerSpot(slot: number, r: number): { x: number; z: number } {
+        return { x: this.laneX(slot) + 62, z: this.rowZ(r) - 36 };
+    }
+
+    /** 透视相机：俯角固定，注视点 = 相机跟随位置。返回屏幕坐标、立牌缩放与视深。 */
+    private proj(wx: number, wz: number): { x: number; y: number; s: number; d: number } {
+        const c = this.view.cam;
+        const X = wx - c.x, Z = wz - c.z;
+        const d = CAM_R + Z * CAM_COS;
+        const s = CAM_F / d;
+        return { x: X * s, y: FOCUS_Y + Z * CAM_SIN * s, s, d };
+    }
+
+    /** 贴地多边形（世界坐标点列），先按近裁剪面裁切再投影。 */
+    private groundPoly(g: Graphics, pts: number[]) {
+        const zn = this.view.cam.z + (NEAR_DEPTH - CAM_R) / CAM_COS;
+        const out: number[] = [];
+        const n = pts.length / 2;
+        for (let i = 0; i < n; i++) {
+            const j = (i + 1) % n;
+            const ax = pts[i * 2], az = pts[i * 2 + 1], bx = pts[j * 2], bz = pts[j * 2 + 1];
+            if (az >= zn) { out.push(ax, az); }
+            if ((az >= zn) !== (bz >= zn)) { out.push(ax + (bx - ax) * (zn - az) / (bz - az), zn); }
         }
+        if (out.length < 6) { return; }
+        for (let i = 0; i < out.length; i += 2) {
+            const p = this.proj(out[i], out[i + 1]);
+            if (i === 0) { g.moveTo(p.x, p.y); } else { g.lineTo(p.x, p.y); }
+        }
+        g.close();
+        g.fill();
+    }
+
+    private groundEllipse(g: Graphics, x: number, z: number, rx: number, rz: number, seg = 12) {
+        const pts: number[] = [];
+        for (let i = 0; i < seg; i++) {
+            const a = i * Math.PI * 2 / seg;
+            pts.push(x + Math.cos(a) * rx, z + Math.sin(a) * rz);
+        }
+        this.groundPoly(g, pts);
+    }
+
+    /** 所有路线（世界坐标），供绘制与装饰物避让。 */
+    private buildPaths(): MapPath[] {
+        const run = this.run, out: MapPath[] = [];
+        for (let r = 0; r < run.map.length - 1; r++) {
+            const cur = run.map[r], nxt = run.map[r + 1];
+            for (let i = 0; i < cur.length; i++) {
+                for (const j of cur[i].links) {
+                    const used = cur[i].done && nxt[j].done;
+                    out.push({ ax: this.laneX(cur[i].slot), az: this.rowZ(r), bx: this.laneX(nxt[j].slot), bz: this.rowZ(r + 1), used, w: used ? 26 : 18 });
+                }
+            }
+        }
+        for (const n of run.map[0]) {
+            out.push({ ax: START.x, az: START.z, bx: this.laneX(n.slot), bz: 0, used: n.done, w: n.done ? 26 : 16 });
+        }
+        return out;
+    }
+
+    /** 地表斑块（草皮/泥地），同区种子固定。 */
+    private buildTurf(stage: number): MapTurf[] {
+        let seed = stage * 3571 + 7;
+        const rnd = () => { seed = (seed * 48271) % 2147483647; return seed / 2147483647; };
+        const out: MapTurf[] = [];
+        for (let i = 0; i < 46; i++) {
+            out.push({
+                x: -GROUND_X + rnd() * GROUND_X * 2, z: GROUND_Z0 + rnd() * (GROUND_Z1 - GROUND_Z0),
+                rx: 60 + rnd() * 120, rz: 40 + rnd() * 80, light: rnd() < 0.45,
+            });
+        }
+        return out;
+    }
+
+    /** 区域主题装饰物：种子随机撒布（同区布局固定），避开节点与路线。 */
+    private buildOrnaments(stage: number): { x: number; z: number; s: number; k: number }[] {
+        let seed = stage * 7919 + 13;
+        const rnd = () => { seed = (seed * 48271) % 2147483647; return seed / 2147483647; };
+        const nodePts: { x: number; z: number }[] = [{ x: START.x, z: START.z }, { x: START.x - 70, z: START.z - 30 }];
+        this.run.map.forEach((row, r) => row.forEach((n) => nodePts.push({ x: this.laneX(n.slot), z: this.rowZ(r) })));
+        const segDist = (x: number, z: number, p: MapPath) => {
+            const dx = p.bx - p.ax, dz = p.bz - p.az, l2 = dx * dx + dz * dz || 1;
+            const t = Math.max(0, Math.min(1, ((x - p.ax) * dx + (z - p.az) * dz) / l2));
+            const ex = p.ax + dx * t - x, ez = p.az + dz * t - z;
+            return Math.sqrt(ex * ex + ez * ez);
+        };
+        const out: { x: number; z: number; s: number; k: number }[] = [];
+        for (let i = 0; i < 500 && out.length < 110; i++) {
+            const x = -GROUND_X + 40 + rnd() * (GROUND_X * 2 - 80), z = GROUND_Z0 + 40 + rnd() * (GROUND_Z1 - GROUND_Z0 - 80);
+            const s = 12 + rnd() * 14, k = Math.floor(rnd() * 4);
+            if (nodePts.some((p) => Math.abs(p.x - x) < 120 && Math.abs(p.z - z) < 100)) { continue; }
+            if (this.view.paths.some((p) => segDist(x, z, p) < 55)) { continue; }
+            out.push({ x, z, s, k });
+        }
+        return out;
+    }
+
+    private drawGround(g: Graphics) {
+        const v = this.view, c = STAGES[v.stage].color;
+        const L = -GROUND_X, R = GROUND_X, N = GROUND_Z0, F = GROUND_Z1;
+        const zn = v.cam.z + (NEAR_DEPTH - CAM_R) / CAM_COS;
+        const tint = (m: number, a = 255) => new Color(Math.min(255, Math.round(c[0] * m)), Math.min(255, Math.round(c[1] * m)), Math.min(255, Math.round(c[2] * m)), a);
+        // 地台前沿厚度（漂浮的立体地块）
+        if (N >= zn) {
+            const nl = this.proj(L, N), nr = this.proj(R, N), h = SLAB * nl.s;
+            g.fillColor = tint(0.45);
+            g.moveTo(nl.x, nl.y); g.lineTo(nr.x, nr.y); g.lineTo(nr.x, nr.y - h); g.lineTo(nl.x, nl.y - h);
+            g.close();
+            g.fill();
+            g.fillColor = tint(0.3);
+            g.rect(nl.x, nl.y - h - 6 * nl.s, nr.x - nl.x, 6 * nl.s);
+            g.fill();
+        }
+        g.fillColor = tint(1);
+        this.groundPoly(g, [L, N, R, N, R, F, L, F]);
+        for (const t of v.turf) {
+            g.fillColor = t.light ? tint(1.25, 110) : tint(0.72, 120);
+            this.groundEllipse(g, t.x, t.z, t.rx, t.rz);
+        }
+        if (N >= zn) {
+            const nl = this.proj(L, N), nr = this.proj(R, N);
+            g.strokeColor = tint(1.5, 160);
+            g.lineWidth = 2;
+            g.moveTo(nl.x, nl.y); g.lineTo(nr.x, nr.y); g.stroke();
+        }
+    }
+
+    /** 远景雾：越远越暗，最终融入背景。 */
+    private drawFog(g: Graphics) {
+        const v = this.view, z0 = v.cam.z + FADE_Z0 * 0.8, z1 = v.cam.z + FADE_Z1 + 500;
+        g.fillColor = new Color(COL.bg.r, COL.bg.g, COL.bg.b, 38);
+        for (let i = 0; i < 8; i++) {
+            const z = z0 + (z1 - z0) * i / 8;
+            this.groundPoly(g, [-GROUND_X * 3, z, GROUND_X * 3, z, GROUND_X * 3, z1 + 3000, -GROUND_X * 3, z1 + 3000]);
+        }
+    }
+
+    /** 相机移动时重算：地面、路线、立牌投影、影子与绘制顺序。 */
+    private layoutMap() {
+        const v = this.view, g = v.ground;
+        g.clear();
+        this.drawGround(g);
+        g.fillColor = new Color(255, 255, 255, 60);
+        for (const d of this.run.deco) {
+            const p = this.proj(d.x * 2.2, (d.y - 40 + 280) / 104 * ROW_GAP);
+            if (p.d < NEAR_DEPTH) { continue; }
+            g.ellipse(p.x, p.y, d.r * 1.6 * p.s, d.r * 1.6 * p.s * CAM_SIN * 0.6);
+            g.fill();
+        }
+        // 路线：先描暗边再铺路面
+        for (const p of v.paths) {
+            const dx = p.bx - p.ax, dz = p.bz - p.az, len = Math.sqrt(dx * dx + dz * dz) || 1;
+            const layers: [number, Color][] = [[p.w + 10, new Color(40, 30, 22, 90)], [p.w, p.used ? COL.gold : new Color(128, 104, 78, 200)]];
+            for (const [w, col] of layers) {
+                const nx = -dz / len * w / 2, nz = dx / len * w / 2;
+                g.fillColor = col;
+                this.groundPoly(g, [p.ax + nx, p.az + nz, p.bx + nx, p.bz + nz, p.bx - nx, p.bz - nz, p.ax - nx, p.az - nz]);
+                this.groundEllipse(g, p.bx, p.bz, w / 2, w / 2, 8);
+            }
+        }
+        // 立牌：投影 + 远处淡出 + 投在地面的影子与折起的底座
+        for (const it of v.items) {
+            const p = this.proj(it.x, it.z);
+            const Z = it.z - v.cam.z;
+            const fade = Z <= FADE_Z0 ? 1 : Math.max(0, 1 - (Z - FADE_Z0) / (FADE_Z1 - FADE_Z0));
+            const vis = p.d > NEAR_DEPTH && p.y > -1000 && fade > 0.01;
+            it.root.active = vis;
+            if (!vis) { continue; }
+            it.root.setPosition(p.x, p.y, 0);
+            it.root.setScale(p.s * it.k, p.s * it.k, 1);
+            it.op.opacity = Math.round(255 * fade * it.dim);
+            this.drawFootprint(g, it, p, fade);
+        }
+        this.drawFog(g);
+        v.items.slice().sort((a, b) => b.z - a.z).forEach((it, i) => it.root.setSiblingIndex(i));
+    }
+
+    /** 立牌落在地面的部分：斜投影、接触阴影、可达光圈、向前折起的纸底座。 */
+    private drawFootprint(g: Graphics, it: Standee, p: { x: number; y: number; s: number }, fade: number) {
+        const hw = it.w * it.k / 2, H = it.h * it.k;
+        const hop = it === this.marker ? this.markerHop : 0;
+        const a = (n: number) => Math.round(n * fade * it.dim);
+        g.fillColor = new Color(0, 0, 0, a(52));
+        this.groundPoly(g, [
+            it.x - hw, it.z, it.x + hw, it.z,
+            it.x + hw * 0.7 + H * SHADOW_DX, it.z + H * SHADOW_DZ,
+            it.x - hw * 0.7 + H * SHADOW_DX, it.z + H * SHADOW_DZ,
+        ]);
+        const sh = Math.max(0.45, 1 - hop / 50);
+        g.fillColor = new Color(0, 0, 0, a(95 * sh));
+        g.ellipse(p.x, p.y, hw * 1.15 * p.s * sh, hw * 1.15 * p.s * sh * CAM_SIN * 0.5);
+        g.fill();
+        if (it.ring) {
+            g.strokeColor = new Color(COL.gold.r, COL.gold.g, COL.gold.b, a(230));
+            g.lineWidth = 3;
+            g.ellipse(p.x, p.y, hw * 1.5 * p.s, hw * 1.5 * p.s * CAM_SIN * 0.55);
+            g.stroke();
+        }
+        if (it.flap && hop < 1) {
+            const fd = hw * 0.55;
+            g.fillColor = new Color(PAPER_EDGE.r, PAPER_EDGE.g, PAPER_EDGE.b, a(255));
+            this.groundPoly(g, [it.x - hw * 0.98, it.z - fd - 3, it.x + hw * 0.98, it.z - fd - 3, it.x + hw * 0.98, it.z - fd + 2, it.x - hw * 0.98, it.z - fd + 2]);
+            g.fillColor = new Color(PAPER_SHADE.r, PAPER_SHADE.g, PAPER_SHADE.b, a(255));
+            this.groundPoly(g, [it.x - hw * 0.86, it.z, it.x + hw * 0.86, it.z, it.x + hw * 0.98, it.z - fd, it.x - hw * 0.98, it.z - fd]);
+            const l = this.proj(it.x - hw * 0.86, it.z), r = this.proj(it.x + hw * 0.86, it.z);
+            g.strokeColor = new Color(PAPER_EDGE.r, PAPER_EDGE.g, PAPER_EDGE.b, a(255));
+            g.lineWidth = 1.5;
+            g.moveTo(l.x, l.y); g.lineTo(r.x, r.y); g.stroke();
+        }
+    }
+
+    /** 纸片立牌：root 落在地面投影点，card 为直立面（底部锚点）。影子/底座由地面层绘制。 */
+    private mkStandee(name: string, x: number, z: number, w: number, h: number, k: number, flap: boolean): Standee {
+        const root = mkNode(this.view.stand, name, 0, 0, 0, 0);
+        const op = root.addComponent(UIOpacity);
+        const card = mkNode(root, 'card', w, h, 0, 0);
+        card.getComponent(UITransform).setAnchorPoint(0.5, 0);
+        const it: Standee = { root, card, op, x, z, k, w, h, flap, dim: 1, ring: false };
+        this.view.items.push(it);
+        return it;
+    }
+
+    /** 折纸立起：直立面从贴地压扁状态弹起。 */
+    private foldUp(card: Node, delay: number, sx = 1) {
+        card.setScale(sx, 0.04, 1);
+        tween(card).delay(delay).to(0.34, { scale: new Vec3(sx, 1, 1) }, { easing: 'backOut' }).start();
+    }
+
+    /** 纸板：右下错位的侧面厚度 + 正面 + 左上受光边 + 底部压暗。 */
+    private drawPaperBoard(g: Graphics, x: number, y: number, w: number, h: number, r: number, face: Color) {
+        g.fillColor = PAPER_DARK;
+        g.roundRect(x + PAPER_T, y - PAPER_T, w, h, r);
+        g.fill();
+        g.fillColor = PAPER_EDGE;
+        g.roundRect(x + PAPER_T * 0.5, y - PAPER_T * 0.5, w, h, r);
+        g.fill();
+        g.fillColor = face;
+        g.roundRect(x, y, w, h, r);
+        g.fill();
+        g.fillColor = new Color(0, 0, 0, 34);
+        g.roundRect(x, y, w, Math.min(h, 14), Math.min(r, 6));
+        g.fill();
+        g.strokeColor = new Color(255, 252, 240, 210);
+        g.lineWidth = 2;
+        g.moveTo(x + 1.5, y + r); g.lineTo(x + 1.5, y + h - r);
+        g.arc(x + r, y + h - r, r - 1.5, Math.PI, Math.PI / 2, false);
+        g.lineTo(x + w - r, y + h - 1.5);
+        g.stroke();
+        g.strokeColor = PAPER_SHADE;
+        g.lineWidth = 1.5;
+        g.roundRect(x + 4, y + 4, w - 8, h - 8, Math.max(2, r - 3));
+        g.stroke();
+    }
+
+    /** 节点立牌：纸板支脚 + 圆牌（带厚度与受光）+ 原节点图案。 */
+    private drawNodeCard(card: Node, kind: NodeKind, state: string, s: number) {
+        const lift = 16, R = s + 6, cy = lift + R;
+        const g = card.addComponent(Graphics);
+        const layers: [number, Color][] = [[PAPER_T, PAPER_DARK], [PAPER_T * 0.5, PAPER_EDGE], [0, state === 'far' ? PAPER_DIM : PAPER]];
+        for (const [o, c] of layers) {
+            g.fillColor = c;
+            g.rect(-7 + o, -o, 14, lift + 8);
+            g.fill();
+            g.circle(o, cy - o, R);
+            g.fill();
+        }
+        g.fillColor = new Color(0, 0, 0, 40);
+        g.rect(-7, 0, 14, 7);
+        g.fill();
+        g.strokeColor = new Color(255, 252, 240, 210);
+        g.lineWidth = 2;
+        g.arc(0, cy, R - 1.5, Math.PI * 0.45, Math.PI * 1.1, true);
+        g.stroke();
+        const face = mkNode(card, 'face', 0, 0, 0, cy);
+        this.drawMapNode(face.addComponent(Graphics), kind, state);
     }
 
     private enterNode(kind: NodeKind) {
