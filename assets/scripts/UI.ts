@@ -1,11 +1,9 @@
-// 骰命远征 —— 纯代码 UI 构建辅助
+// 烽火长歌 —— 纯代码 UI 构建辅助
 import {
     Node, UITransform, Graphics, Label, Button, Color, Layers,
     HorizontalTextAlignment, VerticalTextAlignment,
     tween, Tween, Vec3, UIOpacity,
 } from 'cc';
-import { SLOT_TEXT } from './Data';
-import type { CardDef, Intent } from './Data';
 
 // 欧式中世纪配色：深色橡木 / 皮革 / 青铜描边 / 酒红按钮 / 羊皮纸文字
 export const COL = {
@@ -147,6 +145,28 @@ export function drawDie(g: Graphics, size: number, die: { value: number; sel?: b
     }
 }
 
+/** 画一颗 D20（六边形 + 点数）。数字用子 Label 显示，返回该 Label 以便翻动时更新。 */
+export function drawD20(g: Graphics, size: number, value: number, sel = false, label: Label = null): Label {
+    g.clear();
+    const r = size / 2;
+    g.lineWidth = sel ? 5 : 3;
+    g.strokeColor = sel ? COL.gold : new Color(90, 70, 50, 255);
+    g.fillColor = new Color(178, 52, 42, 255);
+    for (let i = 0; i < 6; i++) {
+        const a = Math.PI / 6 + i * Math.PI / 3;
+        if (i === 0) { g.moveTo(Math.cos(a) * r, Math.sin(a) * r); } else { g.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+    }
+    g.close();
+    g.fill();
+    g.stroke();
+    g.strokeColor = new Color(255, 210, 190, 90);
+    g.lineWidth = 2;
+    g.moveTo(0, r * 0.62); g.lineTo(-r * 0.54, -r * 0.31); g.lineTo(r * 0.54, -r * 0.31); g.close(); g.stroke();
+    const l = label || mkLabel(g.node, '', Math.round(size * 0.3), new Color(255, 246, 228, 255), 0, -2);
+    l.string = '' + value;
+    return l;
+}
+
 // ---------------- 血条 ----------------
 
 export interface BarHandle {
@@ -173,73 +193,6 @@ export function mkBar(parent: Node, w: number, h: number, x = 0, y = 0): BarHand
     };
     set(1);
     return { node: n, g, set };
-}
-
-// ---------------- 人物 ----------------
-
-/** 简化卡通小人：圆头 + 方身体 + 眼睛。size 为整体高度。 */
-export function drawHeroFigure(g: Graphics, size: number, body: Color) {
-    g.clear();
-    const skin = new Color(240, 208, 178, 255);
-    const dark = new Color(40, 40, 50, 255);
-    // 身体
-    g.fillColor = body;
-    g.roundRect(-size * 0.32, -size * 0.5, size * 0.64, size * 0.62, size * 0.16);
-    g.fill();
-    // 头
-    g.fillColor = skin;
-    g.circle(0, size * 0.26, size * 0.24);
-    g.fill();
-    // 眼睛
-    g.fillColor = dark;
-    g.circle(-size * 0.09, size * 0.3, size * 0.035);
-    g.fill();
-    g.circle(size * 0.09, size * 0.3, size * 0.035);
-    g.fill();
-    // 腰带
-    g.fillColor = new Color(30, 30, 40, 255);
-    g.rect(-size * 0.32, -size * 0.18, size * 0.64, size * 0.07);
-    g.fill();
-}
-
-/** 敌方怪物：深色块 + 角 + 怒目。 */
-export function drawMonsterFigure(g: Graphics, size: number, body: Color) {
-    g.clear();
-    const eyeW = new Color(255, 240, 220, 255);
-    const pupil = new Color(200, 40, 30, 255);
-    // 角
-    g.fillColor = new Color(50, 45, 60, 255);
-    g.moveTo(-size * 0.3, size * 0.28);
-    g.lineTo(-size * 0.42, size * 0.62);
-    g.lineTo(-size * 0.12, size * 0.38);
-    g.close();
-    g.fill();
-    g.moveTo(size * 0.3, size * 0.28);
-    g.lineTo(size * 0.42, size * 0.62);
-    g.lineTo(size * 0.12, size * 0.38);
-    g.close();
-    g.fill();
-    // 身体
-    g.fillColor = body;
-    g.roundRect(-size * 0.44, -size * 0.5, size * 0.88, size * 0.86, size * 0.3);
-    g.fill();
-    // 眼睛
-    g.fillColor = eyeW;
-    g.circle(-size * 0.16, size * 0.1, size * 0.09);
-    g.fill();
-    g.circle(size * 0.16, size * 0.1, size * 0.09);
-    g.fill();
-    g.fillColor = pupil;
-    g.circle(-size * 0.16, size * 0.1, size * 0.045);
-    g.fill();
-    g.circle(size * 0.16, size * 0.1, size * 0.045);
-    g.fill();
-    // 嘴
-    g.strokeColor = new Color(30, 25, 35, 255);
-    g.lineWidth = size * 0.03;
-    g.moveTo(-size * 0.14, -size * 0.18);
-    g.lineTo(size * 0.14, -size * 0.18);
-    g.stroke();
 }
 
 // ---------------- 动画辅助 ----------------
@@ -329,94 +282,6 @@ export function floatText(parent: Node, text: string, x: number, y: number,
     tween(op).delay(0.5).to(0.28, { opacity: 0 }).call(() => n.destroy()).start();
 }
 
-// ---------------- 卡牌视图（羊皮纸卡 + 骰槽） ----------------
-
-const CARD_FILL = new Color(240, 226, 190, 255);
-const CARD_TYPE_COL: { [k: string]: Color } = {
-    attack: new Color(170, 60, 46, 255),
-    skill: new Color(80, 118, 158, 255),
-    dice: new Color(80, 146, 92, 255),
-};
-const INK = new Color(66, 48, 32, 255);
-
-export interface CardView {
-    node: Node;
-    g: Graphics;
-    badgeG: Graphics;
-    badgeLabel: Label;
-    def: CardDef;
-    w: number;
-    h: number;
-}
-
-export function mkCard(parent: Node, def: CardDef, x: number, y: number, w = 132, h = 190): CardView {
-    const n = mkNode(parent, 'card_' + def.id, w, h, x, y);
-    const g = n.addComponent(Graphics);
-    const border = def.rare ? COL.gold : CARD_TYPE_COL[def.type];
-    g.fillColor = CARD_FILL;
-    g.strokeColor = border;
-    g.lineWidth = def.rare ? 4 : 2.5;
-    g.roundRect(-w / 2, -h / 2, w, h, 10);
-    g.fill();
-    g.stroke();
-    // 名称条
-    g.fillColor = new Color(84, 60, 40, 255);
-    g.roundRect(-w / 2 + 3, h / 2 - 30, w - 6, 26, 6);
-    g.fill();
-    mkLabel(n, def.name, 14, new Color(250, 244, 228, 255), 0, h / 2 - 17);
-    // 骰槽徽标（右上角）
-    const bn = mkNode(n, 'badge', 34, 34, w / 2 - 20, h / 2 - 18);
-    const badgeG = bn.addComponent(Graphics);
-    drawSlotBadge(badgeG, def.slot, false);
-    const badgeLabel = mkLabel(bn, SLOT_TEXT[def.slot], 11, new Color(255, 246, 220, 255), 0, 0);
-    // 底部类型条
-    g.fillColor = CARD_TYPE_COL[def.type];
-    g.roundRect(-w / 2 + 3, -h / 2 + 3, w - 6, 16, 4);
-    g.fill();
-    mkLabel(n, def.type === 'attack' ? '攻击' : def.type === 'skill' ? '技能' : '骰子',
-        10.5, new Color(255, 246, 220, 255), 0, -h / 2 + 11);
-    // 描述（深褐墨字）
-    mkLabel(n, def.desc, 10.5, INK, 0, def.slot === 'none' ? 6 : -4, w - 18);
-    // 空骰槽示意
-    if (def.slot !== 'none') {
-        g.strokeColor = new Color(140, 110, 80, 180);
-        g.lineWidth = 2;
-        g.roundRect(-17, h / 2 - 66, 34, 34, 6);
-        g.stroke();
-        mkLabel(n, '骰', 13, new Color(150, 120, 90, 200), 0, h / 2 - 49);
-    }
-    return { node: n, g, badgeG, badgeLabel, def, w, h };
-}
-
-/** 骰槽徽标：圆形，按条件变色。filled=true 表示已放骰子。 */
-export function drawSlotBadge(g: Graphics, slot: string, filled: boolean) {
-    g.clear();
-    const col = slot === 'none' ? new Color(120, 100, 80, 255)
-        : filled ? COL.gold : new Color(110, 80, 50, 255);
-    g.fillColor = col;
-    g.strokeColor = new Color(50, 36, 24, 255);
-    g.lineWidth = 2;
-    g.circle(0, 0, 16);
-    g.fill();
-    g.stroke();
-}
-
-/** 意图徽章（敌人头顶）：返回面板节点。 */
-export function mkIntentChip(parent: Node, it: Intent, str: number, x: number, y: number): Label {
-    let text = '';
-    let col: Color = COL.panel;
-    const d = (it.dmg || 0) + str;
-    switch (it.type) {
-        case 'atk': text = '攻击 ' + d + (it.hits && it.hits > 1 ? '×' + it.hits : ''); col = new Color(140, 46, 38, 255); break;
-        case 'atkblock': text = '攻击 ' + d + (it.hits && it.hits > 1 ? '×' + it.hits : '') + ' 格挡 ' + it.block; col = new Color(120, 70, 46, 255); break;
-        case 'block': text = '格挡 ' + it.block; col = new Color(70, 100, 140, 255); break;
-        case 'buff': text = '强化 +' + it.str; col = new Color(150, 100, 40, 255); break;
-        case 'curse': text = '诅咒：下回合 -1 骰'; col = new Color(100, 56, 120, 255); break;
-    }
-    mkPanel(parent, 170, 34, x, y, col, 8, COL.border, 2);
-    return mkLabel(parent, text, 16, new Color(255, 246, 224, 255), x, y);
-}
-
 // ---------------- 地图节点图标 ----------------
 
 export type MapKindName = 'battle' | 'elite' | 'treasure' | 'event' | 'rest' | 'boss';
@@ -476,10 +341,4 @@ export function drawNodeIcon(g: Graphics, kind: MapKindName) {
             break;
         }
     }
-}
-
-// ---------------- 标签 ----------------
-
-export function mkTag(parent: Node, text: string, x = 0, y = 0, color: Color = COL.gold): Label {
-    return mkLabel(parent, text, 16, color, x, y, 0);
 }

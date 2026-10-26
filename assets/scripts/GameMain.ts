@@ -1,35 +1,29 @@
-// 骰命远征 —— 入口组件（竖屏单人冒险）：营地 / 选人 / 地图 / 事件 / 宝箱 / 奖励 / 结算
-import { _decorator, Component, Node, Label, Graphics, sys, Color, tween, Vec3, UIOpacity, BlockInputEvents } from 'cc';
+// 烽火长歌 —— 入口组件（竖屏）：营地四选三 / 区域冒险地图 / 战斗 / 探索检定 / 战利品 / 结算
+import { _decorator, Component, Node, Graphics, sys, Color, tween, Vec3, UIOpacity, HorizontalTextAlignment } from 'cc';
 import {
-    HEROES, NORMAL_ENEMIES, ELITES, STAGES, EVENTS, RULES,
-    NODE_NAME, heroById, COLUMN_X, makeHero, starterDeck, rewardOptions, cardById,
-    fateTier, fateBattleEntry, fateLines, scaleEnemy,
+    HEROES, STAGES, EVENTS, RULES, PROF, ATTR_NAME, NODE_NAME, COLUMN_X,
+    heroById, makeHero, partyNote, encounter, rewardOptions, rewardText, applyReward, weaponName, weaponById,
 } from './Data';
-import type {
-    HeroInst, EnemyDef, EventDef, NodeKind, MapNode, RunState, SaveData, BattleEntry,
-} from './Data';
-import {
-    COL, mkNode, mkLabel, mkPanel, mkButton, setBtnEnabled, drawPanel,
-    drawDie, bob, drawNodeIcon, popIn, mkCard, mkBar,
-} from './UI';
+import type { HeroInst, EnemyDef, EventDef, EventOpt, EvOutcome, NodeKind, MapNode, RunState, SaveData, Reward } from './Data';
+import { mod, check, checkText, dcName, signed, successChance } from './RuleResolver';
+import type { CheckResult } from './RuleResolver';
+import { COL, mkNode, mkLabel, mkPanel, mkButton, setBtnEnabled, drawD20, bob, drawNodeIcon, popIn, mkBar } from './UI';
 import { BattleScreen } from './BattleScreen';
 import { buildRig, rigIdle } from './Figures';
 
 const { ccclass } = _decorator;
 
-const SAVE_KEY = 'dfx_save_v1';
-const START_OWNED = ['astro', 'bulwark', 'gambler'];
+const SAVE_KEY = 'fhcg_save_v1';
+const CIRCLED = ['①', '②', '③'];
 
 @ccclass('GameMain')
 export class GameMain extends Component {
-    private save: SaveData = { gold: 0, owned: START_OWNED.slice(), trials: {} };
+    private save: SaveData = { gold: 0, trials: {} };
     private run: RunState = null;
-    private pick: string = null;
+    private picks: string[] = ['pei', 'shen', 'ye'];
     private mapMsg = '';
-    private autoBattle = false;
     private marker: Node = null;
     private mapBusy = false;
-    private trial: { [id: string]: boolean } = {};
 
     onLoad() {
         this.load();
@@ -42,31 +36,28 @@ export class GameMain extends Component {
     private playIntro() {
         const ov = mkNode(this.node, 'intro', 0, 0, 0, 0);
         const bg = mkPanel(ov, 720, 1280, 0, 0, new Color(18, 13, 10, 255), 0, null, 0);
-        const dragon = buildRig(ov, 'boss', 230, 130, 150, true);
-        rigIdle(dragon);
-        popIn(dragon.root, 0.5, 0.2, 1.1, 0.3);
-        ['bulwark', 'astro', 'cleric'].forEach((id, i) => {
-            const r = buildRig(ov, id, 110, -230 + i * 80, -240 - i * 10);
+        HEROES.forEach((h, i) => {
+            const r = buildRig(ov, h.visual, 120, -255 + i * 170, -250);
             rigIdle(r, i * 0.2);
-            popIn(r.root, 0.4, 0.2, 1.15, 0.5 + i * 0.12);
+            popIn(r.root, 0.4, 0.2, 1.15, 0.4 + i * 0.12);
         });
-        const dn = mkNode(ov, 'die', 120, 120, 0, 340);
-        drawDie(dn.addComponent(Graphics), 120, { value: 5 });
-        tween(dn).repeatForever(tween(dn).by(0.5, { angle: 180 })).start();
-        bob(dn, 16, 0.45);
-        const t1 = mkLabel(ov, '骰 命 远 征', 60, COL.gold, 0, -80);
-        const t2 = mkLabel(ov, '骰子决定当下，英雄决定你怎样利用结果', 17, COL.dim, 0, -140);
+        const dn = mkNode(ov, 'd20', 140, 140, 0, 330);
+        const dl = drawD20(dn.addComponent(Graphics), 140, 20);
+        tween(dn).repeatForever(tween(dn).by(0.6, { angle: 120 })).start();
+        bob(dn, 14, 0.5);
+        let k = 0;
+        this.schedule(() => { if (dl.isValid) { dl.string = '' + (1 + (k++ * 7) % 20); } }, 0.12, 20);
+        const t1 = mkLabel(ov, '烽 火 长 歌', 62, COL.gold, 0, -20);
+        const t2 = mkLabel(ov, '乱世聚义，骰定天下。', 20, COL.text, 0, -90);
+        const t3 = mkLabel(ov, '乱世之中，以三人之力，书写属于自己的长歌', 15, COL.dim, 0, -125);
         const hint = mkLabel(ov, '点击任意处进入', 15, new Color(160, 140, 115, 255), 0, -480);
-        const o1 = t1.node.addComponent(UIOpacity); o1.opacity = 0;
-        const o2 = t2.node.addComponent(UIOpacity); o2.opacity = 0;
-        const o3 = hint.node.addComponent(UIOpacity); o3.opacity = 0;
+        const ops = [t1, t2, t3, hint].map((l) => { const o = l.node.addComponent(UIOpacity); o.opacity = 0; return o; });
         t1.node.setScale(2.4, 0.2, 1);
         tween(t1.node).to(0.5, { scale: Vec3.ONE }).start();
-        tween(o1).to(0.4, { opacity: 255 }).start();
-        tween(o2).delay(0.5).to(0.4, { opacity: 255 }).start();
-        tween(o3).delay(0.9).to(0.3, { opacity: 255 }).start();
-        tween(o3).delay(1.4).repeatForever(
-            tween(o3).to(0.5, { opacity: 90 }).to(0.5, { opacity: 255 })).start();
+        tween(ops[0]).to(0.4, { opacity: 255 }).start();
+        tween(ops[1]).delay(0.5).to(0.4, { opacity: 255 }).start();
+        tween(ops[2]).delay(0.8).to(0.4, { opacity: 255 }).start();
+        tween(ops[3]).delay(1.2).repeatForever(tween(ops[3]).to(0.5, { opacity: 255 }).to(0.5, { opacity: 90 })).start();
         const ovOp = ov.addComponent(UIOpacity);
         let closed = false;
         const close = () => {
@@ -75,7 +66,7 @@ export class GameMain extends Component {
             tween(ovOp).to(0.35, { opacity: 0 }).call(() => ov.destroy()).start();
         };
         bg.node.once(Node.EventType.TOUCH_END, close);
-        this.scheduleOnce(close, 3.0);
+        this.scheduleOnce(close, 3.2);
     }
 
     // ---------------- 存档 ----------------
@@ -85,17 +76,13 @@ export class GameMain extends Component {
             const raw = sys.localStorage.getItem(SAVE_KEY);
             if (raw) {
                 const d = JSON.parse(raw);
-                if (d && typeof d.gold === 'number' && Array.isArray(d.owned)) {
-                    this.save = {
-                        gold: d.gold, owned: d.owned.filter((id) => !!heroById(id)),
-                        trials: d.trials && typeof d.trials === 'object' ? d.trials : {},
-                    };
-                    if (this.save.owned.length === 0) { this.save.owned = START_OWNED.slice(); }
+                if (d && typeof d.gold === 'number') {
+                    this.save = { gold: d.gold, trials: d.trials && typeof d.trials === 'object' ? d.trials : {} };
                     return;
                 }
             }
         } catch (e) { /* 存档损坏则用默认 */ }
-        this.save = { gold: 0, owned: START_OWNED.slice(), trials: {} };
+        this.save = { gold: 0, trials: {} };
     }
 
     private store() {
@@ -107,190 +94,77 @@ export class GameMain extends Component {
         return mkPanel(this.node, 720, 1280, 0, 0, COL.bg, 0, null, 0).node;
     }
 
-    // ---------------- 营地 ----------------
+    // ---------------- 营地：四选三 ----------------
 
     private showHome() {
         const root = this.clearScreen();
         this.run = null;
-        if (!this.pick || (this.save.owned.indexOf(this.pick) < 0 && !this.trial[this.pick])) {
-            this.pick = this.save.owned[0];
-        }
+        mkLabel(root, '烽 火 长 歌', 52, COL.gold, 0, 590);
+        mkLabel(root, '乱世聚义，骰定天下。', 16, COL.dim, 0, 548);
+        mkLabel(root, '青州流民营地　·　累计带回 ' + this.save.gold + ' 钱', 15, COL.text, 0, 516);
+        mkLabel(root, '—— 选择三名主角出征（四选三，本次战役不可更换）——', 16, COL.gold, 0, 484);
 
-        mkLabel(root, '骰 命 远 征', 54, COL.gold, 0, 570);
-        mkLabel(root, '骰子决定当下，英雄决定你怎样利用结果', 16, COL.dim, 0, 526);
-        mkLabel(root, '金币：' + this.save.gold + '　英雄：' + this.save.owned.length + '/' + HEROES.length,
-            17, COL.text, 0, 490);
-
-        // 英雄名册：点选一名英雄出征
-        mkLabel(root, '—— 选择一名英雄出征 ——', 18, COL.gold, 0, 450);
-        const cardW = 330, cardH = 158, gapY = 12;
-        const btns: { [id: string]: Node } = {};
-        for (let i = 0; i < HEROES.length; i++) {
-            const def = HEROES[i];
-            const col = i % 2, rowIdx = Math.floor(i / 2);
-            const x = -170 + col * 340;
-            const y = 380 - rowIdx * (cardH + gapY);
-            const owned = this.save.owned.indexOf(def.id) >= 0;
-            const trying = !owned && !!this.trial[def.id];
-            const usable = owned || trying;
-            const p = mkPanel(root, cardW, cardH, x, y,
-                usable ? COL.panel : COL.btnOff, 8, COL.border, 2);
+        const cw = 344, ch = 318;
+        HEROES.forEach((def, i) => {
+            const x = i % 2 === 0 ? -176 : 176, y = 300 - Math.floor(i / 2) * (ch + 12);
+            const order = this.picks.indexOf(def.id);
+            const on = order >= 0;
+            const p = mkPanel(root, cw, ch, x, y, on ? COL.panelLight : COL.panel, 10, on ? COL.gold : COL.border, on ? 3 : 2);
             const c = def.color;
-            mkPanel(p.node, cardW, 26, 0, cardH / 2 - 13,
-                usable ? new Color(c[0], c[1], c[2], 255) : new Color(60, 52, 46, 255), 6, null, 0);
-            mkLabel(p.node, def.name + '·' + def.title + '　HP ' + def.maxHp, 16,
-                new Color(255, 255, 255, 255), 0, cardH / 2 - 13);
-            const r = buildRig(p.node, def.id, 92, -108, -18);
-            rigIdle(r, i * 0.1);
-            if (!usable) { r.root.addComponent(UIOpacity).opacity = 70; }
+            mkPanel(p.node, cw - 6, 30, 0, ch / 2 - 18, new Color(c[0], c[1], c[2], 255), 7, null, 0);
+            mkLabel(p.node, def.title + ' · ' + def.name, 18, new Color(255, 250, 236, 255), 0, ch / 2 - 18);
+            if (on) { mkLabel(p.node, CIRCLED[order], 22, COL.gold, cw / 2 - 22, ch / 2 - 18); }
+            mkLabel(p.node, def.role, 12, COL.gold, 0, ch / 2 - 48);
+            const r = buildRig(p.node, def.visual, 108, -100, 34);
+            rigIdle(r, i * 0.15);
+            if (!on) { r.root.addComponent(UIOpacity).opacity = 150; }
+            const w = weaponById(def.weapon);
+            const lines = [
+                '生命 ' + def.maxHp + '　防御 ' + (def.ac + (w.ac || 0)),
+                '武器 ' + w.name + '（1D' + w.die + '）',
+                '资源 ' + def.res + '（上限 ' + def.resMax + '）',
+                '站位 ' + (def.row === 'front' ? '前排' : '后排'),
+            ];
+            lines.forEach((t, k) => mkLabel(p.node, t, 12.5, COL.text, 70, 72 - k * 22, 190, HorizontalTextAlignment.LEFT));
+            const a = def.attrs;
+            mkLabel(p.node, '力' + a.str + ' 敏' + a.dex + ' 体' + a.con + ' 智' + a.int + ' 感' + a.wis + ' 魅' + a.cha,
+                12, COL.dim, 0, -38);
+            mkLabel(p.node, def.passive, 11.5, COL.text, 0, -72, cw - 24);
+            mkLabel(p.node, def.story, 10.5, COL.dim, 0, -116, cw - 24);
             const t = (this.save.trials || {})[def.id];
-            mkLabel(p.node, def.passive, 11.5, COL.dim, 36, 8, 170);
-            mkLabel(p.node, owned ? (t ? '远征战绩 ' + t.clears + '/' + t.runs : '尚未出征')
-                : trying ? '试玩中（一次）' : '未招募 · 看广告试玩', 12,
-                owned ? COL.gold : trying ? COL.green : COL.dim, 36, -44);
-            if (usable) {
-                p.node.on(Node.EventType.TOUCH_END, () => {
-                    this.pick = def.id;
-                    this.showHome();
-                });
-            } else {
-                p.node.on(Node.EventType.TOUCH_END, () => this.onRecruit());
-            }
-            btns[def.id] = p.node;
-        }
-        // 选中描边
-        for (const id of Object.keys(btns)) {
-            if (id === this.pick) {
-                drawPanel(btns[id].getComponent(Graphics), cardW, cardH, COL.panelLight, 8, COL.gold, 3);
-            }
-        }
-
-        const go = mkButton(root, '开始远征', 300, 62, -170, -470, 24, () => this.startRun(this.pick));
-        setBtnEnabled(go, !!this.pick, 300, 62);
-        const canRecruit = this.save.owned.length < HEROES.length && this.save.gold >= RULES.recruitCost;
-        const rec = mkButton(root,
-            this.save.owned.length >= HEROES.length ? '已集齐英雄' : '招募(' + RULES.recruitCost + '金)',
-            300, 62, 170, -470, 20, () => this.onRecruit());
-        setBtnEnabled(rec, canRecruit, 300, 62);
-        mkLabel(root, '战斗：掷骰后把骰子放进卡牌触发效果，牌组随战利品成长。', 13, COL.dim, 0, -560);
-    }
-
-    /** 模拟广告：倒计时 5s 后解锁该英雄一次试玩（正式版换激励视频回调）。 */
-    private showFakeAd(heroId: string) {
-        const ov = mkPanel(this.node, 520, 680, 0, 0, COL.panelLight, 12, COL.gold, 3);
-        ov.node.on(Node.EventType.TOUCH_END, () => undefined); // 拦截穿透（不能用 BlockInputEvents，会拦截子按钮）
-        popIn(ov.node, 0.35, 0.4, 1.1);
-        mkLabel(ov.node, '广告 · 试玩 ' + heroById(heroId).name, 22, COL.gold, 0, 292);
-        mkLabel(ov.node, '（正式版接入广告后播放激励视频）', 12, COL.dim, 0, 262);
-        const r = buildRig(ov.node, heroId, 130, 0, 100);
-        rigIdle(r);
-        const dn = mkNode(ov.node, 'die', 84, 84, 0, -50);
-        const dg = dn.addComponent(Graphics);
-        drawDie(dg, 84, { value: 6 });
-        let left = 5;
-        const cd = mkLabel(ov.node, '剩余 ' + left + ' s', 18, COL.text, 0, -150);
-        const closeB = mkButton(ov.node, '观看中…', 200, 54, 0, -230, 18, () => {
-            if (left > 0) { return; }
-            this.trial[heroId] = true;
-            this.pick = heroId;
-            this.unschedule(tick);
-            ov.node.destroy();
-            const ro = this.node.getChildByName('recruitOv');
-            if (ro && ro.isValid) { ro.destroy(); }
-            this.showHome();
-        });
-        setBtnEnabled(closeB, false, 200, 54);
-        mkButton(ov.node, '算了', 120, 44, 0, -300, 15, () => {
-            this.unschedule(tick);
-            ov.node.destroy();
-            this.onRecruit(); // 返回招募列表
-        });
-        const tick = () => {
-            if (!dn.isValid) { this.unschedule(tick); return; }
-            left--;
-            drawDie(dg, 84, { value: 1 + Math.floor(Math.random() * 6) });
-            dn.angle = (Math.random() - 0.5) * 40;
-            if (left <= 0) {
-                dn.angle = 0;
-                cd.string = '试玩已解锁！';
-                closeB.label.string = '领取试玩';
-                setBtnEnabled(closeB, true, 200, 54);
-                this.unschedule(tick);
-                return;
-            }
-            cd.string = '剩余 ' + left + ' s';
-        };
-        this.schedule(tick, 1);
-    }
-
-    private onRecruit() {
-        const pool = HEROES.filter((h) => this.save.owned.indexOf(h.id) < 0);
-        if (pool.length === 0) { this.mapMsg = '全员已集结'; this.showHome(); return; }
-        const stale = this.node.getChildByName('recruitOv');
-        if (stale && stale.isValid) { stale.destroy(); }
-        const ov = mkPanel(this.node, 560, 720, 0, 0, COL.panelLight, 12, COL.gold, 3);
-        ov.node.name = 'recruitOv';
-        ov.node.on(Node.EventType.TOUCH_END, () => undefined); // 拦截穿透（不能用 BlockInputEvents，会拦截子按钮）
-        popIn(ov.node, 0.35, 0.4, 1.1);
-        mkLabel(ov.node, '招募英雄 · ' + RULES.recruitCost + ' 金币/位', 22, COL.gold, 0, 322);
-        mkLabel(ov.node, '现有金币 ' + this.save.gold, 14, COL.dim, 0, 294);
-        for (let i = 0; i < pool.length; i++) {
-            const def = pool[i];
-            const y = 226 - i * 108;
-            mkPanel(ov.node, 500, 96, 0, y, COL.panel, 8, COL.border, 1.5);
-            const r = buildRig(ov.node, def.id, 60, -195, y - 4);
-            rigIdle(r, i * 0.1);
-            mkLabel(ov.node, def.name + '·' + def.title + ' HP' + def.maxHp, 16, COL.text, -60, y + 22);
-            mkLabel(ov.node, def.passive, 11, COL.dim, -60, y - 8, 290);
-            const bb = mkButton(ov.node, RULES.recruitCost + ' 金币', 108, 40, 108, y - 22, 13, () => {
-                if (this.save.gold < RULES.recruitCost) { return; }
-                this.save.gold -= RULES.recruitCost;
-                this.save.owned.push(def.id);
-                this.store();
-                ov.node.destroy();
-                this.recruitDone(def);
+            mkLabel(p.node, t ? '出征 ' + t.runs + ' · 通关 ' + t.clears : '尚未出征', 11, on ? COL.gold : COL.dim, 0, -ch / 2 + 14);
+            p.node.on(Node.EventType.TOUCH_END, () => {
+                const k = this.picks.indexOf(def.id);
+                if (k >= 0) { this.picks.splice(k, 1); } else if (this.picks.length < 3) { this.picks.push(def.id); }
+                this.showHome();
             });
-            setBtnEnabled(bb, this.save.gold >= RULES.recruitCost, 108, 40);
-            mkButton(ov.node, '广告试玩', 100, 40, 218, y - 22, 13, () => this.showFakeAd(def.id));
-        }
-        mkButton(ov.node, '算了', 120, 44, 0, -332, 15, () => ov.node.destroy());
-    }
-
-    private recruitDone(got: { id: string; name: string; title: string; passive: string }) {
-        const overlay = mkPanel(this.node, 440, 360, 0, 0, COL.panelLight, 12, COL.gold, 3);
-        popIn(overlay.node, 0.35, 0.4, 1.12);
-        mkLabel(overlay.node, '招募成功！', 26, COL.gold, 0, 150);
-        const r = buildRig(overlay.node, got.id, 120, 0, 60);
-        rigIdle(r);
-        mkLabel(overlay.node, got.name + '·' + got.title, 20, COL.text, 0, -30);
-        mkLabel(overlay.node, got.passive, 13, COL.dim, 0, -70, 400);
-        mkButton(overlay.node, '太好了', 160, 48, 0, -140, 18, () => {
-            overlay.node.destroy();
-            this.showHome();
         });
+
+        const note = this.picks.length === 3 ? partyNote(this.picks) : null;
+        mkLabel(root, note ? '阵容特点：' + note.note + '　短板：' + note.weak
+            : '已选 ' + this.picks.length + '/3 —— 点击卡片选择或取消', 14, note ? COL.gold : COL.dim, 0, -372, 680);
+        const go = mkButton(root, '出 征', 300, 64, 0, -440, 26, () => this.startRun(this.picks.slice()));
+        setBtnEnabled(go, this.picks.length === 3, 300, 64);
+        const tips = [
+            '每名角色每回合独立掷 3D6，骰子不能互换；把骰子填进技能骰槽来行动',
+            'D20 决定成败（命中/检定/豁免），武器骰结算伤害；敌人头顶显示行动意图',
+            '四大区域：青州 → 汉北 → 黑水谷 → 洛阳；只有通关才能带回钱',
+        ];
+        tips.forEach((t, k) => mkLabel(root, t, 12.5, COL.dim, 0, -510 - k * 26, 690));
     }
 
     // ---------------- 远征 ----------------
 
-    private startRun(heroId: string) {
-        const def = heroById(heroId);
+    private startRun(ids: string[]) {
         const deco: { x: number; y: number; r: number }[] = [];
         for (let i = 0; i < 40; i++) {
             deco.push({ x: -270 + Math.random() * 540, y: -360 + Math.random() * 780, r: 1 + Math.random() * 2.2 });
         }
         this.run = {
-            hero: makeHero(def),
-            deck: starterDeck(def),
-            gold: 0,
-            buffs: { extraDie: 0 },
-            map: this.genMap(),
-            posRow: -1,
-            posCol: -1,
-            depth: 0,
-            stage: 0,
-            deco,
+            party: ids.map((id) => makeHero(heroById(id))),
+            gold: 0, map: this.genMap(), posRow: -1, posCol: -1, depth: 0, stage: 0, deco,
         };
-        this.mapMsg = '远征开始！点击发光节点沿路线前进';
+        this.mapMsg = STAGES[0].goal;
         this.showMap();
     }
 
@@ -362,8 +236,7 @@ export class GameMain extends Component {
                 const kk = k === undefined ? st.t : k;
                 const hk = (kk * 2) % 1;
                 const y = Math.sin(Math.PI * hk) * 34 * (1 - kk * 0.35);
-                this.marker.setPosition(from.x + (dst.x - from.x) * kk,
-                    from.y + (dst.y - from.y) * kk + y, 0);
+                this.marker.setPosition(from.x + (dst.x - from.x) * kk, from.y + (dst.y - from.y) * kk + y, 0);
             },
         }).call(() => {
             this.run.posRow = r;
@@ -372,15 +245,13 @@ export class GameMain extends Component {
         }).start();
     }
 
-    /** 关卡主题装饰物：种子随机撒布（同关布局固定），避开节点位置。 */
+    /** 区域主题装饰物：种子随机撒布（同区布局固定），避开节点位置。 */
     private stageOrn(stage: number): { x: number; y: number; s: number; k: number }[] {
         let seed = stage * 7919 + 13;
         const rnd = () => { seed = (seed * 48271) % 2147483647; return seed / 2147483647; };
         const nodePts: { x: number; y: number }[] = [];
         for (let r = 0; r < 6; r++) {
-            for (const s of [0, 0.5, 1.5, 2, 2.5, 3]) {
-                nodePts.push({ x: this.slotX(s), y: this.rowY(r) });
-            }
+            for (const s of [0, 0.5, 1.5, 2, 2.5, 3]) { nodePts.push({ x: this.slotX(s), y: this.rowY(r) }); }
         }
         const out: { x: number; y: number; s: number; k: number }[] = [];
         for (let i = 0; i < 60 && out.length < 30; i++) {
@@ -393,25 +264,25 @@ export class GameMain extends Component {
 
     private drawOrn(g: Graphics, stage: number, x: number, y: number, s: number, k: number) {
         switch (stage) {
-            case 0: // 黑森林：松树剪影
+            case 0: // 青州：青山松影
                 g.fillColor = new Color(16, 28, 18, 255);
                 g.moveTo(x, y + s); g.lineTo(x - s * 0.7, y - s * 0.1); g.lineTo(x + s * 0.7, y - s * 0.1); g.close(); g.fill();
                 g.moveTo(x, y + s * 0.4); g.lineTo(x - s * 0.85, y - s * 0.9); g.lineTo(x + s * 0.85, y - s * 0.9); g.close(); g.fill();
                 break;
-            case 1: // 古堡：残砖断壁
-                g.fillColor = new Color(32, 30, 36, 255);
+            case 1: // 汉北：关隘残垣
+                g.fillColor = new Color(34, 32, 28, 255);
                 g.rect(x - s * 0.5, y - s * 0.3, s, s * 0.6); g.fill();
                 if (k % 2 === 0) { g.rect(x - s * 0.15, y + s * 0.3, s * 0.3, s * 0.5); g.fill(); }
                 else { g.rect(x - s * 0.7, y - s * 0.1, s * 0.35, s * 0.35); g.fill(); }
                 break;
-            case 2: // 地穴：晶簇
-                g.fillColor = new Color(78, 118, 130, 210);
+            case 2: // 黑水谷：峡谷乱石
+                g.fillColor = new Color(70, 96, 108, 200);
                 g.moveTo(x, y + s * 0.85); g.lineTo(x - s * 0.4, y); g.lineTo(x, y - s * 0.45); g.lineTo(x + s * 0.4, y); g.close(); g.fill();
                 if (k % 2 === 0) {
                     g.moveTo(x + s * 0.5, y + s * 0.5); g.lineTo(x + s * 0.25, y - s * 0.05); g.lineTo(x + s * 0.7, y - s * 0.15); g.close(); g.fill();
                 }
                 break;
-            default: // 龙巢：火纹裂刺
+            default: // 洛阳：烽火
                 g.fillColor = new Color(128, 54, 32, 220);
                 g.moveTo(x - s * 0.6, y - s * 0.4); g.lineTo(x - s * 0.05, y + s * 0.75); g.lineTo(x + s * 0.35, y - s * 0.15); g.close(); g.fill();
                 if (k % 2 === 0) {
@@ -439,9 +310,7 @@ export class GameMain extends Component {
         if (state === 'done') {
             g.strokeColor = COL.green;
             g.lineWidth = 5;
-            g.moveTo(-11, 0);
-            g.lineTo(-3, -9);
-            g.lineTo(12, 9);
+            g.moveTo(-11, 0); g.lineTo(-3, -9); g.lineTo(12, 9);
             g.stroke();
         }
     }
@@ -450,23 +319,21 @@ export class GameMain extends Component {
         const root = this.clearScreen();
         const run = this.run;
         this.mapBusy = false;
-        const hero = run.hero;
 
-        // 顶部状态栏
-        mkLabel(root, hero.def.name + '　HP ' + Math.ceil(hero.hp) + '/' + hero.maxHp,
-            20, COL.gold, 0, 605);
-        this.hpBar = mkBar(root, 300, 16, -160, 575);
-        this.hpBar.set(hero.hp / hero.maxHp);
-        mkLabel(root, '金币 ' + run.gold + '　牌组 ' + run.deck.length + '　进度 ' + run.depth, 14, COL.text, 160, 575);
-        if (this.mapMsg) { mkLabel(root, this.mapMsg, 14, COL.gold, 0, 545); }
-        mkLabel(root, '牌组内容：' + run.deck.map((c) => cardById(c).name).join(' '), 11, COL.dim, 0, -545, 660);
-        mkButton(root, '撤退', 190, 46, -250, -600, 16, () => {
-            this.finishRun(false);
-            this.showHome();
+        // 顶部：三名角色状态
+        run.party.forEach((h, i) => {
+            const x = -230 + i * 230;
+            mkLabel(root, h.def.name + '　' + Math.max(0, h.hp) + '/' + h.maxHp, 15, h.hp > 0 ? COL.gold : COL.red, x, 612);
+            mkBar(root, 190, 12, x, 590).set(h.hp / h.maxHp);
+            mkLabel(root, weaponName(h.weapon), 11.5, COL.dim, x, 572);
         });
-        mkLabel(root, '点击发光节点前进，走过无法回头', 12, COL.dim, 160, -600);
+        mkLabel(root, '钱 ' + run.gold + '　进度 ' + run.depth + '/24　' + STAGES[run.stage].name, 14, COL.text, 0, 546);
+        if (this.mapMsg) { mkLabel(root, this.mapMsg, 14, COL.gold, 0, 520, 680); }
+        mkButton(root, '撤退', 160, 46, -265, -600, 16, () => { this.finishRun(false); this.showHome(); });
+        mkLabel(root, '点击发光节点前进，走过无法回头；撤退不带回钱', 12, COL.dim, 90, -600);
+        mkLabel(root, '本章目标：' + STAGES[run.stage].goal, 13, COL.dim, 0, -545, 680);
 
-        // 地图容器（每关一种底色 + 关卡名）
+        // 地图
         const mapRoot = mkNode(root, 'map', 0, 0, 0, -40);
         const st = STAGES[run.stage];
         const bg = mkNode(mapRoot, 'bands', 620, 640, 0, 0).addComponent(Graphics);
@@ -476,10 +343,8 @@ export class GameMain extends Component {
         bg.fillColor = new Color(255, 255, 255, 70);
         for (const d of run.deco) { bg.circle(d.x * 0.9, d.y - 40, d.r); bg.fill(); }
         for (const o of this.stageOrn(run.stage)) { this.drawOrn(bg, run.stage, o.x, o.y, o.s, o.k); }
-        mkLabel(mapRoot, '第 ' + (run.stage + 1) + ' 关 · ' + st.name,
-            19, new Color(226, 210, 180, 255), 218, 232);
+        mkLabel(mapRoot, '第 ' + (run.stage + 1) + ' 章 · ' + st.short, 19, new Color(226, 210, 180, 255), 218, 232);
 
-        // 连线
         const lg = mkNode(mapRoot, 'links', 0, 0, 0, 0).addComponent(Graphics);
         for (let r = 0; r < run.map.length - 1; r++) {
             const cur = run.map[r], nxt = run.map[r + 1];
@@ -497,14 +362,9 @@ export class GameMain extends Component {
         if (run.posRow < 0) {
             lg.lineWidth = 3;
             lg.strokeColor = new Color(110, 90, 70, 130);
-            for (const n of run.map[0]) {
-                lg.moveTo(0, -360);
-                lg.lineTo(this.slotX(n.slot), this.rowY(0));
-                lg.stroke();
-            }
+            for (const n of run.map[0]) { lg.moveTo(0, -360); lg.lineTo(this.slotX(n.slot), this.rowY(0)); lg.stroke(); }
         }
 
-        // 节点
         for (let r = 0; r < run.map.length; r++) {
             const row = run.map[r];
             for (let i = 0; i < row.length; i++) {
@@ -516,8 +376,7 @@ export class GameMain extends Component {
                 this.drawMapNode(n.addComponent(Graphics), nd.kind, state);
                 if (state === 'far') { n.addComponent(UIOpacity).opacity = 95; }
                 if (state === 'next') {
-                    tween(n).repeatForever(
-                        tween(n).to(0.55, { scale: new Vec3(1.12, 1.12, 1) }).to(0.55, { scale: Vec3.ONE })).start();
+                    tween(n).repeatForever(tween(n).to(0.55, { scale: new Vec3(1.12, 1.12, 1) }).to(0.55, { scale: Vec3.ONE })).start();
                     const rr = r, ii = i;
                     n.on(Node.EventType.TOUCH_END, () => this.travelTo(rr, ii));
                 }
@@ -526,10 +385,9 @@ export class GameMain extends Component {
             }
         }
 
-        // 英雄标记
+        // 队伍标记（领队）
         this.marker = mkNode(mapRoot, 'marker', 54, 80, 0, 0);
-        const mr = buildRig(this.marker, hero.def.id, 68, 0, 0);
-        rigIdle(mr);
+        rigIdle(buildRig(this.marker, run.party[0].def.visual, 68, 0, 0));
         if (run.posRow < 0) {
             this.marker.setPosition(0, -360, 0);
             mkLabel(mapRoot, '▼ 出发', 14, COL.dim, 0, -396);
@@ -538,82 +396,21 @@ export class GameMain extends Component {
         }
     }
 
-    private hpBar = null;
-
     private enterNode(kind: NodeKind) {
-        const roll = 1 + Math.floor(Math.random() * 6);
-        const tier = fateTier(roll);
-        this.rollOverlay('命运掷骰 · ' + NODE_NAME[kind], roll, fateLines(kind, tier), () => {
-            this.enterNodeContent(kind, tier);
-        });
-    }
-
-    private enterNodeContent(kind: NodeKind, tier: number) {
         switch (kind) {
-            case 'battle':
-                this.startBattle(scaleEnemy(
-                    NORMAL_ENEMIES[Math.floor(Math.random() * NORMAL_ENEMIES.length)], this.run.stage),
-                    fateBattleEntry(kind, tier));
+            case 'battle': case 'elite': case 'boss':
+                this.startBattle(encounter(kind, this.run.stage, Math.random), kind);
                 break;
-            case 'elite':
-                this.startBattle(scaleEnemy(
-                    ELITES[Math.floor(Math.random() * ELITES.length)], this.run.stage),
-                    fateBattleEntry(kind, tier));
-                break;
-            case 'boss': this.startBattle(STAGES[this.run.stage].boss, fateBattleEntry(kind, tier)); break;
-            case 'treasure': this.showTreasure(tier); break;
-            case 'event': this.showEvent(EVENTS[Math.floor(Math.random() * EVENTS.length)], tier); break;
-            case 'rest': this.showRest(tier); break;
+            case 'treasure': this.showTreasure(); break;
+            case 'event': this.showEvent(EVENTS[Math.floor(Math.random() * EVENTS.length)]); break;
+            case 'rest': this.showRest(); break;
         }
     }
 
-    /** 掷骰演出浮层：骰子翻滚后停在目标点数，显示结果文案，点击继续。 */
-    private rollOverlay(title: string, roll: number, lines: string[], onDone: () => void) {
-        const ov = mkPanel(this.node, 720, 1280, 0, 0, new Color(14, 10, 8, 242), 0, null, 0);
-        ov.node.addComponent(BlockInputEvents);
-        const op = ov.node.addComponent(UIOpacity);
-        op.opacity = 0;
-        tween(op).to(0.25, { opacity: 255 }).start();
-        mkLabel(ov.node, title, 30, COL.gold, 0, 340);
-        const dn = mkNode(ov.node, 'fdie', 150, 150, 0, 80);
-        const dg = dn.addComponent(Graphics);
-        drawDie(dg, 150, { value: 1 });
-        let phase = 0;
-        const tick = () => {
-            if (phase !== 0 || !dn.isValid) { return; }
-            drawDie(dg, 150, { value: 1 + Math.floor(Math.random() * 6) });
-            dn.angle = (Math.random() - 0.5) * 30;
-        };
-        const settle = () => {
-            if (phase !== 0) { return; }
-            phase = 1;
-            dn.angle = 0;
-            drawDie(dg, 150, { value: roll, sel: true });
-            popIn(dn, 0.3, 1.5, 1.12);
-            for (let i = 0; i < lines.length; i++) {
-                const l = mkLabel(ov.node, lines[i], i === 0 ? 24 : 16,
-                    i === 0 ? COL.gold : COL.text, 0, -50 - i * 36);
-                const lo = l.node.addComponent(UIOpacity);
-                lo.opacity = 0;
-                tween(lo).delay(0.15 + i * 0.1).to(0.25, { opacity: 255 }).start();
-            }
-            const hint = mkLabel(ov.node, '点 击 继 续', 14, COL.dim, 0, -280);
-            const ho = hint.node.addComponent(UIOpacity);
-            ho.opacity = 0;
-            tween(ho).delay(0.5).to(0.3, { opacity: 200 }).start();
-        };
-        this.schedule(tick, 0.09, 9);
-        this.scheduleOnce(settle, 0.95);
-        ov.node.on(Node.EventType.TOUCH_END, () => {
-            if (phase === 0) { settle(); } else { ov.node.destroy(); onDone(); }
-        });
-    }
-
-    private startBattle(enemy: EnemyDef, entry?: BattleEntry) {
+    private startBattle(enemies: EnemyDef[], kind: NodeKind) {
         const root = this.clearScreen();
         const bn = mkNode(root, 'battle', 0, 0, 0, 0);
-        const bs = bn.addComponent(BattleScreen);
-        bs.init(this.run.hero, this.run.deck, enemy, this.run.buffs, (won, gold) => {
+        bn.addComponent(BattleScreen).init(this.run.party, enemies, (won, gold) => {
             bn.destroy();
             if (!won) {
                 this.finishRun(false);
@@ -621,16 +418,15 @@ export class GameMain extends Component {
                 return;
             }
             this.run.gold += gold;
-            if (this.run.hero.def.id === 'cleric') {
-                this.run.hero.hp = Math.min(this.run.hero.maxHp, this.run.hero.hp + RULES.clericWinHeal);
+            for (const h of this.run.party) {
+                h.hp = h.hp <= 0 ? RULES.reviveHp : Math.min(h.maxHp, h.hp + Math.round(h.maxHp * RULES.battleHeal));
             }
-            const node = this.run.map[this.run.posRow][this.run.posCol];
-            if (node.kind === 'boss') {
-                this.advance('胜利！');
+            if (kind === 'boss') {
+                this.advance('击败 ' + enemies[0].name + '！');
             } else {
-                this.rewardRoll(enemy, gold);
+                this.showRewardPick(kind === 'elite' ? 1 : 0, '胜利！获得 ' + gold + ' 钱', null);
             }
-        }, this.autoBattle, entry);
+        });
     }
 
     private advance(msg: string) {
@@ -638,195 +434,202 @@ export class GameMain extends Component {
         nd.done = true;
         this.run.depth++;
         this.mapMsg = msg;
-        if (nd.kind === 'boss') {
-            if (this.run.stage >= STAGES.length - 1) {
-                this.finishRun(true);
-                this.showSettle(true);
-            } else {
-                this.run.stage++;
-                this.run.map = this.genMap();
-                this.run.posRow = -1;
-                this.run.posCol = -1;
-                this.healPct(0.4);
-                this.mapMsg = '凯旋！进入第 ' + (this.run.stage + 1) + ' 关（恢复 40% 生命）';
-                this.showMap();
-            }
-        } else {
-            this.showMap();
+        if (nd.kind !== 'boss') { this.showMap(); return; }
+        if (this.run.stage >= STAGES.length - 1) {
+            this.finishRun(true);
+            this.showSettle(true);
+            return;
         }
+        this.run.stage++;
+        this.run.map = this.genMap();
+        this.run.posRow = -1;
+        this.run.posCol = -1;
+        this.healPct(RULES.stageHeal);
+        this.mapMsg = msg + ' 进军「' + STAGES[this.run.stage].name + '」（全队恢复 ' + Math.round(RULES.stageHeal * 100) + '%）';
+        this.showMap();
     }
 
-    /** 一局结束：存金币 + 记录该英雄战绩。 */
+    /** 一局结束：通关才带回钱 + 记录每名出征角色的战绩。 */
     private finishRun(cleared: boolean) {
         const run = this.run;
         if (!run) { return; }
-        if (cleared) { this.save.gold += run.gold; } // 只有通关才结算金币
+        if (cleared) { this.save.gold += run.gold; }
         if (!this.save.trials) { this.save.trials = {}; }
-        const id = run.hero.def.id;
-        const t = this.save.trials[id] || { runs: 0, clears: 0 };
-        t.runs++;
-        if (cleared) { t.clears++; }
-        this.save.trials[id] = t;
-        delete this.trial[id]; // 试玩一局后收回
+        for (const h of run.party) {
+            const t = this.save.trials[h.def.id] || { runs: 0, clears: 0 };
+            t.runs++;
+            if (cleared) { t.clears++; }
+            this.save.trials[h.def.id] = t;
+        }
         this.store();
+    }
+
+    private healPct(pct: number) {
+        for (const h of this.run.party) {
+            if (h.hp > 0) { h.hp = Math.min(h.maxHp, h.hp + Math.round(h.maxHp * pct)); }
+        }
+    }
+
+    // ---------------- 战利品 ----------------
+
+    /** 三选一战利品；weaponsOnly 时只给兵器（升品/换装）。 */
+    private showRewardPick(bonusQ: number, title: string, weaponsOnly: boolean | null) {
+        const root = this.clearScreen();
+        const party = this.run.party;
+        mkLabel(root, title, 30, COL.gold, 0, 440);
+        mkLabel(root, '选择一项战利品（武器能改变战斗流派）', 16, COL.dim, 0, 396);
+        let opts: Reward[] = rewardOptions(party, Math.random, bonusQ);
+        if (weaponsOnly) {
+            opts = opts.filter((o) => o.kind === 'weapon' || o.kind === 'upgrade');
+            if (!opts.length) { opts = [{ kind: 'heal', pct: 0.25 }]; }
+        }
+        party.forEach((h, i) => mkLabel(root, h.def.name + '：' + weaponName(h.weapon) + '　生命 ' + h.hp + '/' + h.maxHp,
+            14, COL.text, 0, 330 - i * 26));
+        let picked = false;
+        opts.forEach((o, i) => {
+            const b = mkButton(root, rewardText(party, o), 640, 76, 0, 170 - i * 96, 16, () => {
+                if (picked) { return; }
+                picked = true;
+                applyReward(party, o);
+                popIn(b.node, 0.2, 0.9, 1.06);
+                this.scheduleOnce(() => this.advance('获得：' + rewardText(party, o).split('（')[0]), 0.25);
+            });
+        });
+        mkButton(root, '跳过', 180, 52, 0, 170 - opts.length * 96 - 10, 18, () => {
+            if (picked) { return; }
+            picked = true;
+            this.advance('空手而返');
+        });
     }
 
     // ---------------- 节点内容 ----------------
 
-    /** 战后奖励掷骰：1-3 普通卡选 1 张 / 4-5 普通卡选 2 张 / 6 稀有卡池选 1 张（精英升一档）。 */
-    private rewardRoll(enemy: EnemyDef, gold: number) {
-        const roll = 1 + Math.floor(Math.random() * 6);
-        let tier = fateTier(roll);
-        if (enemy.elite && tier < 3) { tier += 1; }
-        const lines = [
-            tier === 3 ? '大吉！稀有卡池开启' : tier === 2 ? '好运！可挑选两张' : '普通战利品',
-            '+' + gold + ' 金币已入袋',
-        ];
-        this.rollOverlay('战利品掷骰', roll, lines, () => this.showRewardPick(tier, gold));
-    }
-
-    private showRewardPick(tier: number, gold: number) {
+    private showTreasure() {
         const root = this.clearScreen();
-        const pickN = tier === 2 ? 2 : 1;
-        mkLabel(root, '胜利！获得 ' + gold + ' 金币', 30, COL.gold, 0, 420);
-        mkLabel(root, '选择 ' + pickN + ' 张卡牌加入牌组（也可跳过）', 17, COL.dim, 0, 380);
-        this.cardPick(0, rewardOptions(this.run.hero.def.id, Math.random, tier === 3), pickN, (ids) => {
-            for (const id of ids) { this.run.deck.push(id); }
-            this.advance('胜利！+' + gold + ' 金' + (ids.length
-                ? '，获得 ' + ids.map((i) => '「' + cardById(i).name + '」').join('') : ''));
-        });
-    }
-
-    /** 选卡界面：从 options 中选 picks 张（已选的会变暗）。onPick(ids) 可能为空（跳过）。 */
-    private cardPick(y0: number, options: string[], picks: number, onPick: (ids: string[]) => void) {
-        const root = this.node.children[this.node.children.length - 1];
-        const gap = 170;
-        const chosen: string[] = [];
+        mkLabel(root, '前朝窖藏', 30, COL.gold, 0, 380);
+        mkLabel(root, '坍塌的地窖里堆着蒙尘的木箱，箱上还贴着前朝官府的封条。', 16, COL.text, 0, 330, 600);
         let done = false;
-        for (let i = 0; i < options.length; i++) {
-            const def = cardById(options[i]);
-            const v = mkCard(root, def, -gap + i * gap, y0 + 30, 150, 210);
-            v.node.on(Node.EventType.TOUCH_END, () => {
-                if (done || chosen.indexOf(options[i]) >= 0) { return; }
-                chosen.push(options[i]);
-                v.node.addComponent(UIOpacity).opacity = 110;
-                popIn(v.node, 0.15, 0.9, 1.05);
-                if (chosen.length >= picks) {
-                    done = true;
-                    this.scheduleOnce(() => onPick(chosen.slice()), 0.3);
-                }
-            });
-        }
-        mkButton(root, '跳过', 180, 52, 0, y0 - 170, 18, () => {
+        const opts: { label: string; apply: () => void }[] = [
+            { label: '取走金银（+35 钱）', apply: () => { this.run.gold += 35; this.advance('窖藏中取得 35 钱'); } },
+            { label: '翻找兵器（兵器战利品）', apply: () => this.showRewardPick(1, '窖藏兵器', true) },
+            { label: '取用伤药（全队恢复 30%）', apply: () => { this.healPct(0.3); this.advance('伤药敷上，伤势好转'); } },
+        ];
+        opts.forEach((o, i) => mkButton(root, o.label, 420, 60, 0, 200 - i * 80, 18, () => {
             if (done) { return; }
             done = true;
-            onPick(chosen.slice());
-        });
+            o.apply();
+        }));
     }
 
-    private showTreasure(tier: number) {
-        const root = this.clearScreen();
-        mkLabel(root, '神秘宝箱', 30, COL.gold, 0, 380);
-        mkLabel(root, '箱盖刻满骰纹，里面传来清脆的碰撞声。', 16, COL.text, 0, 340, 600);
-        const goldAmt = tier === 3 ? 150 : tier === 2 ? 100 : 60;
-        const healPct = tier === 3 ? 0.5 : tier === 2 ? 0.35 : 0.2;
-        const opts: { label: string; apply: () => void }[] = [
-            { label: '拿走金币（+' + goldAmt + '）', apply: () => { this.run.gold += goldAmt; this.advance('开箱获得 ' + goldAmt + ' 金币'); } },
-            { label: '翻找珍奇（获得一张稀有卡）', apply: () => this.showCardReward() },
-            { label: '供奉骰运（恢复 ' + Math.round(healPct * 100) + '% 生命）', apply: () => { this.healPct(healPct); this.advance('获得祝福，恢复了生命'); } },
-        ];
-        for (let i = 0; i < opts.length; i++) {
-            mkButton(root, opts[i].label, 380, 56, 0, 200 - i * 76, 18, opts[i].apply);
-        }
-    }
-
-    private showCardReward() {
-        const root = this.clearScreen();
-        mkLabel(root, '珍奇卡牌', 30, COL.gold, 0, 420);
-        mkLabel(root, '选择一张加入牌组', 17, COL.dim, 0, 380);
-        this.cardPick(0, rewardOptions(this.run.hero.def.id, Math.random, true), 1, (ids) => {
-            const id = ids[0];
-            if (id) { this.run.deck.push(id); }
-            this.advance(id ? '获得「' + cardById(id).name + '」' : '空手而返');
-        });
-    }
-
-    private healPct(pct: number) {
-        const h = this.run.hero;
-        if (h.hp > 0) { h.hp = Math.min(h.maxHp, h.hp + h.maxHp * pct); }
-    }
-
-    private showEvent(ev: EventDef, tier: number) {
-        const root = this.clearScreen();
-        mkLabel(root, ev.title, 28, COL.gold, 0, 400);
-        mkLabel(root, ev.text, 16, COL.text, 0, 350, 600);
-        const mult = tier === 3 ? 2 : tier === 2 ? 1.5 : 1;
-        const rareCost = Math.round(30 / mult);
-        for (let i = 0; i < ev.options.length; i++) {
-            const opt = ev.options[i];
-            const canPay = !(opt.apply === 'buyrare' && this.run.gold < rareCost);
-            const label = tier > 1
-                ? opt.apply === 'buyrare' ? '投入 ' + rareCost + ' 金币（获得一张稀有卡）'
-                    : opt.apply === 'gold45' ? '拾取星屑（+' + Math.round(45 * mult) + ' 金币）'
-                        : opt.label
-                : opt.label;
-            const ob = mkButton(root, label, 480, 60, 0, 240 - i * 80, 17, () => {
-                if (!canPay) { return; }
-                switch (opt.apply) {
-                    case 'gold45': this.run.gold += Math.round(45 * mult); this.advance('拾得 ' + Math.round(45 * mult) + ' 金币'); break;
-                    case 'heal25': this.healPct(0.25 * mult); this.advance('星光抚平了伤口'); break;
-                    case 'heal20': this.healPct(0.2 * mult); this.advance('井水沁人心脾'); break;
-                    case 'blooddie':
-                        this.run.hero.hp = Math.max(1, this.run.hero.hp - this.run.hero.maxHp * 0.15 / mult);
-                        this.run.buffs.extraDie++;
-                        this.advance('以血换运：每回合 +1 骰子');
-                        break;
-                    case 'buyrare':
-                        this.run.gold -= rareCost;
-                        this.showCardReward();
-                        break;
-                    default: this.advance('悄然离开');
-                }
-            });
-            setBtnEnabled(ob, canPay, 480, 60);
-        }
-    }
-
-    private showRest(tier: number) {
+    private showRest() {
         const root = this.clearScreen();
         mkLabel(root, '营火', 30, COL.gold, 0, 400);
-        mkLabel(root, '火光摇曳，骰子在掌心温热。', 16, COL.text, 0, 350);
-        const heal = tier === 3 ? 0.6 : tier === 2 ? 0.45 : RULES.restHealPct;
-        mkButton(root, '休息（恢复 ' + Math.round(heal * 100) + '% 生命）', 380, 60, 0, 240, 18, () => {
-            this.healPct(heal);
-            this.advance('营火旁休整，恢复了生命');
+        mkLabel(root, '篝火噼啪作响，三人轮流守夜。', 16, COL.text, 0, 350);
+        let done = false;
+        mkButton(root, '休整（全队恢复 ' + Math.round(RULES.restHeal * 100) + '%）', 420, 60, 0, 240, 18, () => {
+            if (done) { return; }
+            done = true;
+            this.healPct(RULES.restHeal);
+            this.advance('休整一夜，恢复了元气');
         });
-        mkButton(root, '磨砺技艺（移除一张牌' + (tier === 3 ? '，恢复 15%' : '') + '）',
-            380, 60, 0, 160, 18, () => {
-                if (tier === 3) { this.healPct(0.15); }
-                this.showRemoveCard();
-            });
+        mkButton(root, '操练（全队生命上限 +3，恢复 15%）', 420, 60, 0, 160, 18, () => {
+            if (done) { return; }
+            done = true;
+            for (const h of this.run.party) { h.maxHp += 3; h.hp += 3; }
+            this.healPct(0.15);
+            this.advance('彻夜操练，体魄更加强健');
+        });
     }
 
-    /** 删牌界面：展示整个牌组，点一张删除。 */
-    private showRemoveCard() {
+    /** 探索事件：每个选项由队中该属性最强的角色进行 D20 检定。 */
+    private showEvent(ev: EventDef) {
         const root = this.clearScreen();
-        mkLabel(root, '选择一张牌移除', 28, COL.gold, 0, 540);
-        const deck = this.run.deck;
-        const cols = 4, cw = 160, ch = 220;
-        for (let i = 0; i < deck.length; i++) {
-            const def = cardById(deck[i]);
-            const col = i % cols, row = Math.floor(i / cols);
-            const x = -(cols - 1) * cw / 2 + col * cw;
-            const y = 400 - row * ch;
-            const v = mkCard(root, def, x, y, 140, 200);
-            const idx = i;
-            v.node.on(Node.EventType.TOUCH_END, () => {
-                deck.splice(idx, 1);
-                this.advance('移除了「' + def.name + '」，牌组更精练');
+        mkLabel(root, ev.title, 30, COL.gold, 0, 430);
+        mkLabel(root, ev.text, 16, COL.text, 0, 380, 620);
+        mkLabel(root, '每个选项由队中最擅长者执行 D20 + 属性修正 + 熟练 ≥ DC', 13, COL.dim, 0, 336);
+        let done = false;
+        ev.options.forEach((opt, i) => {
+            const h = this.bestFor(opt);
+            const bonus = mod(h.def.attrs[opt.attr]) + PROF;
+            const pct = Math.round(successChance(bonus, opt.dc) * 100);
+            const b = mkButton(root, opt.label, 600, 84, 0, 230 - i * 104, 18, () => {
+                if (done) { return; }
+                done = true;
+                const c = check(bonus, opt.dc, Math.random);
+                const out = c.crit && opt.crit ? opt.crit : c.success ? opt.ok : opt.fail;
+                this.d20Overlay(opt.label, h, c, out, () => this.applyOutcome(out));
             });
+            mkLabel(b.node, h.def.name + ' ' + ATTR_NAME[opt.attr] + signed(bonus) + ' · DC ' + opt.dc + '（' + dcName(opt.dc) + '）· 成功率约 ' + pct + '%',
+                12.5, COL.gold, 0, -24);
+            b.label.node.setPosition(0, 12, 0);
+        });
+        mkButton(root, '悄然离开', 200, 50, 0, 230 - ev.options.length * 104 - 6, 16, () => {
+            if (done) { return; }
+            done = true;
+            this.advance('悄然离开');
+        });
+    }
+
+    private bestFor(opt: EventOpt): HeroInst {
+        const live = this.run.party.filter((h) => h.hp > 0);
+        return live.sort((a, b) => b.def.attrs[opt.attr] - a.def.attrs[opt.attr])[0] || this.run.party[0];
+    }
+
+    private applyOutcome(o: EvOutcome) {
+        const party = this.run.party;
+        if (o.gold) { this.run.gold = Math.max(0, this.run.gold + o.gold); }
+        if (o.healPct) { this.healPct(o.healPct); }
+        if (o.dmgAll) { for (const h of party) { if (h.hp > 0) { h.hp = Math.max(1, h.hp - o.dmgAll); } } }
+        if (o.dmgOne) {
+            const live = party.filter((h) => h.hp > 0);
+            const t = live[Math.floor(Math.random() * live.length)];
+            if (t) { t.hp = Math.max(1, t.hp - o.dmgOne); }
         }
-        mkButton(root, '算了', 180, 52, 0, -500, 18, () => this.advance('在营火旁休息片刻'));
+        if (o.maxHp) { for (const h of party) { h.maxHp += o.maxHp; h.hp += o.maxHp; } }
+        if (o.fight) { this.startBattle(encounter('battle', this.run.stage, Math.random), 'battle'); return; }
+        if (o.weapon) { this.showRewardPick(1, o.text, true); return; }
+        this.advance(o.text);
+    }
+
+    /** D20 检定演出：骰面翻动后落定，显示检定式与结果，点击继续。 */
+    private d20Overlay(title: string, h: HeroInst, c: CheckResult, out: EvOutcome, onDone: () => void) {
+        const ov = mkPanel(this.node, 720, 1280, 0, 0, new Color(14, 10, 8, 242), 0, null, 0);
+        const op = ov.node.addComponent(UIOpacity);
+        op.opacity = 0;
+        tween(op).to(0.25, { opacity: 255 }).start();
+        mkLabel(ov.node, title, 26, COL.gold, 0, 360, 640);
+        rigIdle(buildRig(ov.node, h.def.visual, 110, -220, 120));
+        mkLabel(ov.node, h.def.name + ' 进行检定', 15, COL.dim, -220, 40);
+        const dn = mkNode(ov.node, 'd20', 170, 170, 40, 130);
+        const dg = dn.addComponent(Graphics);
+        const dl = drawD20(dg, 170, 1);
+        let phase = 0;
+        const tick = () => {
+            if (phase !== 0 || !dn.isValid) { return; }
+            drawD20(dg, 170, 1 + Math.floor(Math.random() * 20), false, dl);
+            dn.angle = (Math.random() - 0.5) * 40;
+        };
+        const settle = () => {
+            if (phase !== 0 || !dn.isValid) { return; }
+            phase = 1;
+            dn.angle = 0;
+            drawD20(dg, 170, c.roll.nat, true, dl);
+            popIn(dn, 0.3, 1.5, 1.12);
+            const res = c.crit ? '大 成 功 ！' : c.fumble ? '大 失 败' : c.success ? '成 功' : '失 败';
+            const lines = [res, checkText(c), out.text];
+            lines.forEach((t, i) => {
+                const l = mkLabel(ov.node, t, i === 0 ? 30 : 17, i === 0 ? (c.success ? COL.gold : COL.red) : COL.text, 0, -60 - i * 44, 640);
+                const lo = l.node.addComponent(UIOpacity);
+                lo.opacity = 0;
+                tween(lo).delay(0.15 + i * 0.12).to(0.25, { opacity: 255 }).start();
+            });
+            mkLabel(ov.node, '点 击 继 续', 14, COL.dim, 0, -300);
+        };
+        this.schedule(tick, 0.08, 11);
+        this.scheduleOnce(settle, 1.0);
+        ov.node.on(Node.EventType.TOUCH_END, () => {
+            if (phase === 0) { settle(); } else { ov.node.destroy(); onDone(); }
+        });
     }
 
     // ---------------- 结算 ----------------
@@ -834,31 +637,23 @@ export class GameMain extends Component {
     private showSettle(victory: boolean) {
         const root = this.clearScreen();
         const run = this.run;
-        const def = run ? run.hero.def : null;
-        const title = mkLabel(root, victory ? '远征凯旋！' : '远征失败……', 40,
-            victory ? COL.gold : COL.red, 0, 300);
+        const title = mkLabel(root, victory ? '天 下 已 定' : '功 败 垂 成', 44, victory ? COL.gold : COL.red, 0, 330);
         popIn(title.node, 0.45, 0.3, 1.2);
-        if (def) {
-            const r = buildRig(root, def.id, 150, 0, 120);
-            rigIdle(r);
-        }
-        const t = def ? (this.save.trials || {})[def.id] : null;
-        mkLabel(root, run ? (victory
-            ? '四关全破，骰命魔龙的骰子归于沉寂。带回金币 ' + run.gold
-            : def.name + ' 止步于第 ' + (run.stage + 1) + ' 关第 ' + (run.posRow + 1)
-                + ' 个节点，带回金币 ' + run.gold) : '',
-            18, COL.text, 0, -20);
-        if (t) {
-            mkLabel(root, '该英雄远征战绩：' + t.clears + '/' + t.runs + ' 通关（' +
-                Math.round(100 * t.clears / Math.max(1, t.runs)) + '%）', 15, COL.dim, 0, -60);
-        }
-        if (def) {
-            mkButton(root, '再来一局', 200, 56, -120, -160, 20, () => {
-                this.pick = def.id;
-                this.startRun(def.id);
+        if (run) {
+            run.party.forEach((h, i) => {
+                const r = buildRig(root, h.def.visual, 120, -220 + i * 220, 150);
+                rigIdle(r, i * 0.2);
+                mkLabel(root, h.def.name + '·' + h.def.title, 15, COL.text, -220 + i * 220, 70);
             });
+            mkLabel(root, victory
+                ? '四大区域尽数平定，旧朝终结。带回 ' + run.gold + ' 钱。'
+                : '止步于「' + STAGES[run.stage].name + '」第 ' + (run.posRow + 1) + ' 个节点，未能带回钱财。',
+            18, COL.text, 0, 10, 640);
+            const ids = run.party.map((h) => h.def.id);
+            mkButton(root, '再来一局（同阵容）', 260, 56, -140, -110, 18, () => this.startRun(ids));
         }
-        mkButton(root, '返回营地', 200, 56, 120, -160, 20, () => this.showHome());
+        mkButton(root, '返回营地', 220, 56, 150, -110, 18, () => this.showHome());
+        mkLabel(root, '提示：重新出征时可在营地更换三人组合', 13, COL.dim, 0, -190);
         this.run = null;
     }
 }

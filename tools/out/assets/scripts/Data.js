@@ -1,222 +1,376 @@
 "use strict";
-// 骰命远征 —— 数据与类型定义（单人冒险 · 骰子 × 卡牌）
-// 战斗规则：每回合掷骰并抽牌，把骰子放进卡牌的骰槽来触发效果（X = 骰子点数）。
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NODE_NAME = exports.RULES = exports.COLUMN_X = exports.EVENTS = exports.STAGES = exports.BOSSES = exports.BOSS = exports.ELITES = exports.NORMAL_ENEMIES = exports.HEROES = exports.CARDS = exports.SLOT_TEXT = void 0;
-exports.cardById = cardById;
-exports.slotOk = slotOk;
-exports.makeHero = makeHero;
+exports.NODE_NAME = exports.RULES = exports.COLUMN_X = exports.EVENTS = exports.STAGES = exports.BOSSES = exports.ELITES = exports.NORMAL_ENEMIES = exports.PARTY_NOTES = exports.HEROES = exports.PROF = exports.QUALITY_NAME = exports.WEAPONS = exports.SKILLS = exports.STATUS = exports.ATTR_NAME = exports.ATTRS = void 0;
+exports.skillById = skillById;
+exports.weaponById = weaponById;
+exports.weaponName = weaponName;
 exports.heroById = heroById;
-exports.starterDeck = starterDeck;
-exports.rewardOptions = rewardOptions;
+exports.partyNote = partyNote;
+exports.makeHero = makeHero;
 exports.scaleEnemy = scaleEnemy;
-exports.fateTier = fateTier;
-exports.fateBattleEntry = fateBattleEntry;
-exports.fateLines = fateLines;
-exports.SLOT_TEXT = {
-    any: '任意', min4: '≥4', max3: '≤3', odd: '奇数', even: '偶数', six: '6', none: '—',
+exports.encounter = encounter;
+exports.rewardOptions = rewardOptions;
+exports.rewardText = rewardText;
+exports.applyReward = applyReward;
+exports.ATTRS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+exports.ATTR_NAME = {
+    str: '力量', dex: '敏捷', con: '体质', int: '智力', wis: '感知', cha: '魅力',
 };
-exports.CARDS = [
-    // —— 基础 ——
-    { id: 'strike', name: '斩击', slot: 'any', type: 'attack', desc: '造成 X 点伤害' },
-    { id: 'defend', name: '格挡', slot: 'any', type: 'skill', desc: '获得 X 点护甲' },
-    // —— 通用 ——
-    { id: 'heavy', name: '重劈', slot: 'min4', type: 'attack', desc: '造成 2X 点伤害' },
-    { id: 'jab', name: '快刺', slot: 'max3', type: 'attack', desc: '造成 X+4 点伤害' },
-    { id: 'twin', name: '双击', slot: 'even', type: 'attack', desc: '造成 X 点伤害 2 次' },
-    { id: 'guard', name: '铁壁', slot: 'max3', type: 'skill', desc: '获得 X+5 点护甲' },
-    { id: 'reroll', name: '重掷', slot: 'any', type: 'dice', desc: '重掷这颗骰子' },
-    { id: 'hone', name: '磨砺', slot: 'any', type: 'dice', desc: '骰子点数 +2（最高 6）' },
-    { id: 'flip', name: '翻转', slot: 'any', type: 'dice', desc: '骰子变为 7-X' },
-    { id: 'split', name: '分裂', slot: 'min4', type: 'dice', desc: '拆成两颗骰子：X÷2 向下与向上取整' },
-    { id: 'leech', name: '汲取', slot: 'any', type: 'attack', desc: '造成 X 点伤害，回复一半', rare: true },
-    { id: 'lucky', name: '幸运币', slot: 'none', type: 'dice', desc: '获得一颗新骰子', rare: true },
-    // —— 职业 ——
-    { id: 'starfall', name: '星落', slot: 'none', type: 'dice', desc: '重掷所有骰子', hero: 'astro' },
-    { id: 'starlight', name: '星辉', slot: 'odd', type: 'attack', desc: '造成 X+4 点伤害，抽 1 张牌', hero: 'astro' },
-    { id: 'shieldbash', name: '盾击', slot: 'any', type: 'attack', desc: '造成 X + 当前护甲÷2 点伤害', hero: 'bulwark' },
-    { id: 'bigshield', name: '重盾', slot: 'min4', type: 'skill', desc: '获得 2X 点护甲', hero: 'bulwark' },
-    { id: 'allin', name: '孤注一掷', slot: 'any', type: 'attack', desc: '重掷此骰并造成新点数伤害；若为 5-6 则伤害×3', hero: 'gambler' },
-    { id: 'coin', name: '幸运币', slot: 'none', type: 'dice', desc: '获得一颗新骰子', hero: 'gambler' },
-    { id: 'venom', name: '毒瓶', slot: 'any', type: 'attack', desc: '给予 X÷2+1 层中毒（向上取整）', hero: 'alch' },
-    { id: 'transmute', name: '嬗变', slot: 'any', type: 'dice', desc: '骰子变为 7-X，抽 1 张牌', hero: 'alch' },
-    { id: 'stab2', name: '连刺', slot: 'odd', type: 'attack', desc: '造成 X 点伤害 2 次', hero: 'shadow' },
-    { id: 'shadowstep', name: '暗影步', slot: 'max3', type: 'skill', desc: '获得 X+3 点护甲，抽 1 张牌', hero: 'shadow' },
-    { id: 'judgment', name: '审判', slot: 'min4', type: 'attack', desc: '造成 2X 点伤害，回复 2 点生命', hero: 'cleric' },
-    { id: 'holylight', name: '圣光', slot: 'even', type: 'attack', desc: '造成 X 点伤害，回复 X÷2', hero: 'cleric' },
-    { id: 'fireball', name: '火球', slot: 'six', type: 'attack', desc: '造成 16 点伤害', hero: 'pyro' },
-    { id: 'ignite', name: '引燃', slot: 'any', type: 'dice', desc: '骰子点数 +3（最高 6）', hero: 'pyro' },
-    { id: 'replicate', name: '复刻', slot: 'any', type: 'dice', desc: '复制这颗骰子', hero: 'tinker' },
-    { id: 'gearshot', name: '齿轮炮', slot: 'max3', type: 'attack', desc: '造成 X+2 点伤害 2 次', hero: 'tinker' },
+/** 每种状态都有上限与衰减规则，避免无限控制或永久异常。 */
+exports.STATUS = {
+    bleed: { name: '流血', max: 10, color: [220, 70, 60], desc: '回合结束损失等同层数的生命，然后层数 -1' },
+    poison: { name: '中毒', max: 10, color: [120, 210, 100], desc: '回合结束损失等同层数的生命，然后层数 -1' },
+    burn: { name: '燃烧', max: 3, color: [240, 140, 50], desc: '回合结束损失 3 点生命，持续回合 -1' },
+    sunder: { name: '破甲', max: 3, color: [200, 170, 120], desc: '防御 -2，持续回合 -1' },
+    stun: { name: '震慑', max: 1, color: [230, 210, 90], desc: '跳过下一次行动；结束后 1 回合内免疫震慑' },
+    disarm: { name: '缴械', max: 2, color: [170, 170, 190], desc: '无法使用武器攻击与武器技能' },
+    fear: { name: '恐惧', max: 2, color: [170, 110, 210], desc: '攻击检定劣势' },
+    weak: { name: '虚弱', max: 6, color: [150, 150, 150], desc: '下一次攻击伤害降低等同层数，回合结束清除' },
+};
+exports.SKILLS = [
+    { id: 'attack', name: '普通攻击', slot: 'none', action: 'main', target: 'enemy', weapon: true,
+        desc: '武器攻击：D20+命中 ≥ 防御，伤害 = 武器骰 + 属性修正' },
+    // —— 武器主动技能 ——
+    { id: 'cleave', name: '力劈华山', slot: 'min4', action: 'main', target: 'enemy', weapon: true,
+        desc: '武器攻击，伤害 +X；命中附加破甲 2 回合' },
+    { id: 'parry', name: '拆招', slot: 'odd', action: 'bonus', target: 'self', weapon: true,
+        desc: '获得 X+3 点护甲' },
+    { id: 'thrust', name: '突刺', slot: 'even', action: 'main', target: 'enemy', weapon: true,
+        desc: '对目标及另一名敌人各进行一次武器攻击，伤害 +X÷2' },
+    { id: 'pierce', name: '穿云箭', slot: 'six', action: 'main', target: 'enemy', weapon: true,
+        desc: '必中，伤害 = 2×武器骰 + 修正 + X' },
+    { id: 'punch', name: '透甲', slot: 'min4', action: 'main', target: 'enemy', weapon: true,
+        desc: '必中的武器攻击，伤害 +X（射击后需装填）' },
+    { id: 'ambush', name: '设伏', slot: 'min4', action: 'main', target: 'enemy', weapon: true,
+        desc: '在目标处设伏：其下次行动前受到 3D8+智力 伤害（击杀则其无法行动）' },
+    { id: 'bulwark', name: '盾守', slot: 'min4', action: 'bonus', target: 'self', weapon: true,
+        desc: '获得 X+4 点护甲' },
+    { id: 'brew', name: '药力', slot: 'any', action: 'bonus', target: 'self', weapon: true,
+        desc: '本回合下一次治疗 +X÷2' },
+    // —— 裴烈 ——
+    { id: 'guard', name: '格挡', slot: 'max3', action: 'bonus', target: 'self',
+        desc: '获得 2X+1 点护甲' },
+    { id: 'protect', name: '守护', slot: 'min4', action: 'bonus', target: 'ally',
+        desc: '本轮生命最低队友受到的下一次单体攻击改由裴烈承受（消耗反应），裴烈获得 X 护甲' },
+    { id: 'breach', name: '破阵', slot: 'pair', action: 'main', target: 'enemy', weapon: true,
+        desc: '武器攻击（优势），伤害 +X+军势×3，耗尽军势' },
+    // —— 沈知远 ——
+    { id: 'insight', name: '识破', slot: 'any', action: 'bonus', target: 'enemy',
+        desc: '智力检定 vs 识破 DC：成功则看穿目标意图、使其破甲 2 回合，并获得 1 筹谋' },
+    { id: 'ploy', name: '扰敌', slot: 'odd', action: 'main', target: 'enemy',
+        desc: '造成 X+智力 点伤害，并使目标下次攻击伤害 -X' },
+    { id: 'chain', name: '连环计', slot: 'pair', action: 'main', target: 'enemy',
+        desc: '目标感知豁免（DC 8+熟练+智力），失败则震慑 1 回合' },
+    { id: 'plan', name: '授计', slot: 'none', action: 'bonus', target: 'party', cost: 1,
+        desc: '消耗 1 筹谋：全队各获得 4 护甲，本回合下一次攻击获得优势' },
+    // —— 叶青 ——
+    { id: 'scout', name: '侦察', slot: 'any', action: 'bonus', target: 'enemy',
+        desc: '感知检定 vs 识破 DC：成功看穿目标意图，并获得 1 先机' },
+    { id: 'aimed', name: '精准射击', slot: 'min4', action: 'main', target: 'enemy', weapon: true,
+        desc: '武器攻击（优势），伤害 +X' },
+    { id: 'snare', name: '陷阱', slot: 'even', action: 'bonus', target: 'enemy',
+        desc: '对目标施加流血 X÷2+1' },
+    { id: 'volley', name: '疾风连射', slot: 'pair', action: 'main', target: 'enemy', weapon: true,
+        desc: '耗尽先机：进行 先机 次武器攻击（至少 1 次）' },
+    // —— 许怀仁 ——
+    { id: 'aid', name: '急救', slot: 'any', action: 'main', target: 'ally',
+        desc: '治疗生命比例最低的队友 1D4+X÷2' },
+    { id: 'cleanse', name: '解毒', slot: 'even', action: 'bonus', target: 'party',
+        desc: '移除全队流血/中毒/燃烧/恐惧；X=6 时全队各恢复 3 点' },
+    { id: 'needle', name: '银针', slot: 'odd', action: 'main', target: 'enemy',
+        desc: '感知远程攻击：命中造成 1D4+感知 伤害并施加中毒 X÷2+1' },
+    { id: 'revive', name: '妙手回春', slot: 'none', action: 'main', target: 'party', cost: 3,
+        desc: '消耗 3 医术点：全队恢复 1D4+感知' },
 ];
-function cardById(id) {
-    return exports.CARDS.find((c) => c.id === id);
+function skillById(id) {
+    return exports.SKILLS.find((s) => s.id === id);
 }
-function slotOk(slot, v) {
-    switch (slot) {
-        case 'any': return true;
-        case 'min4': return v >= 4;
-        case 'max3': return v <= 3;
-        case 'odd': return v % 2 === 1;
-        case 'even': return v % 2 === 0;
-        case 'six': return v === 6;
-        case 'none': return false;
-    }
-    return false;
+exports.WEAPONS = [
+    { id: 'blade', name: '刀', die: 8, attr: 'str', ranged: false, skill: 'cleave', desc: '高爆发、破甲' },
+    { id: 'sword', name: '剑', die: 6, attr: 'finesse', ranged: false, skill: 'parry', desc: '灵活、防守反击（力量/敏捷取高）' },
+    { id: 'spear', name: '长枪', die: 8, attr: 'str', ranged: false, reach: true, skill: 'thrust', desc: '后排也可攻击、突刺两敌' },
+    { id: 'bow', name: '弓', die: 8, attr: 'dex', ranged: true, skill: 'pierce', desc: '远程攻击、穿云箭' },
+    { id: 'xbow', name: '弩', die: 10, attr: 'dex', ranged: true, reload: true, skill: 'punch', desc: '高单发伤害，射击后需装填' },
+    { id: 'mechxbow', name: '机关弩', die: 8, attr: 'int', ranged: true, skill: 'ambush', desc: '设伏、触发式攻击（智力）' },
+    { id: 'shield', name: '盾牌', die: 4, attr: 'str', ranged: false, ac: 2, skill: 'bulwark', desc: '防御 +2，格挡守护' },
+    { id: 'staff', name: '药杖', die: 4, attr: 'wis', ranged: false, skill: 'brew', desc: '辅助治疗、药剂强化（感知）' },
+];
+function weaponById(id) {
+    return exports.WEAPONS.find((w) => w.id === id);
 }
-function makeHero(def) {
-    return { def, hp: def.maxHp, maxHp: def.maxHp };
+exports.QUALITY_NAME = ['普通', '精良', '传奇'];
+function weaponName(w) {
+    return (w.q > 0 ? exports.QUALITY_NAME[w.q] + '·' : '') + weaponById(w.id).name;
 }
+// ---------------- 角色 ----------------
+exports.PROF = 2; // 熟练加值（一级）
 exports.HEROES = [
-    { id: 'astro', name: '占星师', title: '观星者', maxHp: 79, color: [142, 124, 195],
-        passive: '回合开始时，自动重掷所有 1-2 点骰子', cards: ['starfall', 'starlight'] },
-    { id: 'bulwark', name: '铁壁卫', title: '不动壁垒', maxHp: 68, color: [90, 120, 160],
-        passive: '回合结束时保留一半护甲', cards: ['shieldbash', 'bigshield'] },
-    { id: 'gambler', name: '赌徒', title: '孤注一掷', maxHp: 72, color: [200, 150, 60],
-        passive: '每回合首次掷出的 1 点会翻成 6 点', cards: ['allin', 'coin'] },
-    { id: 'alch', name: '炼金术士', title: '点石成金', maxHp: 71, color: [80, 160, 140],
-        passive: '中毒每回合额外造成 1 点伤害', cards: ['venom', 'transmute'] },
-    { id: 'shadow', name: '影行者', title: '魅影连击', maxHp: 69, color: [110, 110, 130],
-        passive: '用奇数骰打出的攻击，每段伤害 +2', cards: ['stab2', 'shadowstep'] },
-    { id: 'cleric', name: '圣愈者', title: '晨曦之手', maxHp: 63, color: [230, 200, 120],
-        passive: '每场战斗胜利后回复 6 点生命', cards: ['judgment', 'holylight'] },
-    { id: 'pyro', name: '烈焰术士', title: '焚运改命', maxHp: 62, color: [200, 90, 60],
-        passive: '用 6 点骰打出的攻击，伤害 +4', cards: ['fireball', 'ignite'] },
-    { id: 'tinker', name: '机关师', title: '精密复制', maxHp: 68, color: [140, 140, 150],
-        passive: '回合开始时额外获得一颗 2 点骰子', cards: ['replicate', 'gearshot'] },
+    {
+        id: 'pei', name: '裴烈', title: '武卫', role: '守护·近战·防御·破阵', visual: 'bulwark', color: [150, 72, 58],
+        attrs: { str: 16, dex: 12, con: 15, int: 9, wis: 12, cha: 10 }, maxHp: 32, ac: 15,
+        weapon: 'blade', weapons: ['blade', 'spear', 'shield', 'sword'],
+        res: '军势', resMax: 3, resStart: 0, row: 'front',
+        passive: '铁壁军魂：成功格挡或守护队友时获得 1 点军势（每回合一次）',
+        skills: ['guard', 'protect', 'breach'],
+        story: '曾经的军伍士卒，亲眼见到军队残害平民。手中的兵器，究竟为保护百姓，还是建立铁血秩序？',
+    },
+    {
+        id: 'shen', name: '沈知远', title: '谋士', role: '控场·机关·交涉·辅助', visual: 'astro', color: [70, 100, 150],
+        attrs: { str: 9, dex: 13, con: 12, int: 16, wis: 14, cha: 13 }, maxHp: 30, ac: 13,
+        weapon: 'mechxbow', weapons: ['mechxbow', 'sword', 'xbow', 'staff'],
+        res: '筹谋', resMax: 3, resStart: 1, row: 'back',
+        passive: '运筹帷幄：每场战斗首次识破敌人意图时额外获得 1 点筹谋',
+        skills: ['insight', 'ploy', 'chain', 'plan'],
+        story: '仕途尽毁的地方士子，熟悉兵法律令。修补旧制度，还是彻底推翻它？',
+    },
+    {
+        id: 'ye', name: '叶青', title: '游侠', role: '远程·侦察·潜行·陷阱', visual: 'shadow', color: [70, 130, 80],
+        attrs: { str: 11, dex: 17, con: 13, int: 11, wis: 14, cha: 10 }, maxHp: 29, ac: 14,
+        weapon: 'bow', weapons: ['bow', 'xbow', 'sword', 'spear'],
+        res: '先机', resMax: 3, resStart: 0, row: 'back',
+        passive: '山林猎手：每回合首次命中额外 +1D4 伤害并获得 1 先机',
+        skills: ['scout', 'aimed', 'snare', 'volley'],
+        story: '山林里长大的猎户，被豪强驱逐。不在乎谁坐上皇位，只在乎百姓能否保住土地。',
+    },
+    {
+        id: 'xu', name: '许怀仁', title: '医师', role: '治疗·解毒·急救·药剂', visual: 'cleric', color: [200, 170, 100],
+        attrs: { str: 10, dex: 12, con: 13, int: 14, wis: 16, cha: 12 }, maxHp: 28, ac: 12,
+        weapon: 'staff', weapons: ['staff', 'sword', 'xbow', 'mechxbow'],
+        res: '医术点', resMax: 3, resStart: 1, row: 'back',
+        passive: '仁心济世：每场战斗首次治疗生命低于一半的队友时额外恢复 4 点；每回合 +1 医术点',
+        skills: ['aid', 'cleanse', 'needle', 'revive'],
+        story: '行走乡野的医师。乱世里药材与生命都成了筹码，每一次救治都是艰难的选择。',
+    },
 ];
 function heroById(id) {
     return exports.HEROES.find((h) => h.id === id);
 }
-function starterDeck(def) {
-    return ['strike', 'strike', 'strike', 'defend', 'defend', 'defend', ...def.cards];
+/** 五种核心阵容（设计 3.2）。 */
+exports.PARTY_NOTES = [
+    { ids: ['pei', 'shen', 'ye'], note: '攻防、控制、远程较均衡', weak: '缺少稳定治疗' },
+    { ids: ['pei', 'ye', 'xu'], note: '承伤、输出、续航', weak: '控场和机关能力较弱' },
+    { ids: ['pei', 'shen', 'xu'], note: '防御、治疗、控场稳健', weak: '远程爆发不足' },
+    { ids: ['shen', 'ye', 'xu'], note: '控制、远程、治疗完整', weak: '前排承伤偏弱，需利用控场避免硬拼' },
+];
+function partyNote(ids) {
+    return exports.PARTY_NOTES.find((p) => p.ids.every((i) => ids.indexOf(i) >= 0)) || null;
 }
-/** 卡牌奖励：3 张不重复候选。rare=true 时从稀有卡 + 职业卡中抽（精英/宝箱）。 */
-function rewardOptions(heroId, rng, rare = false) {
-    const pool = exports.CARDS.filter((c) => c.id !== 'strike' && c.id !== 'defend' &&
-        (!c.hero || c.hero === heroId) && (rare ? (c.rare || !!c.hero) : !c.rare)).map((c) => c.id);
-    const out = [];
-    while (out.length < 3 && pool.length > 0) {
-        out.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
-    }
-    return out;
+function makeHero(def) {
+    return { def, hp: def.maxHp, maxHp: def.maxHp, weapon: { id: def.weapon, q: 0 } };
 }
+/** 全局敌人伤害加值（难度旋钮，用模拟器校准）。 */
+const ENEMY_DMG = 1;
+const D = (n, d, b = 0) => ({ n, d, b: b + ENEMY_DMG });
 exports.NORMAL_ENEMIES = [
-    { id: 'imp', name: '哥布林斥候', maxHp: 30, goldMin: 15, goldMax: 25, desc: '黑森林里成群出没的绿皮小贼',
-        pattern: [{ type: 'atk', dmg: 6 }, { type: 'atk', dmg: 3, hits: 2 }, { type: 'atkblock', dmg: 4, block: 5 }] },
-    { id: 'golem', name: '锈甲傀儡', maxHp: 42, goldMin: 18, goldMax: 28, desc: '古堡废墟中游荡的空心铠甲',
-        pattern: [{ type: 'block', block: 8 }, { type: 'atk', dmg: 9 }, { type: 'atk', dmg: 5, hits: 2 }] },
-    { id: 'viper', name: '沼泽蜥人', maxHp: 34, goldMin: 15, goldMax: 25, desc: '出手频繁，越战越凶',
-        pattern: [{ type: 'atk', dmg: 2, hits: 3 }, { type: 'atk', dmg: 7 }, { type: 'buff', str: 1 }] },
+    { id: 'bandit', name: '流寇', visual: 'gambler', maxHp: 36, ac: 12, atk: 4, save: 0, insight: 11, gold: [6, 10],
+        desc: '饥荒逼出来的亡命之徒',
+        pattern: [{ type: 'atk', dmg: D(1, 8, 3) }, { type: 'charge', amount: 3 }, { type: 'atk', dmg: D(1, 8, 3) }] },
+    { id: 'soldier', name: '官兵', visual: 'golem', maxHp: 45, ac: 14, atk: 5, save: 1, insight: 11, gold: [8, 12],
+        desc: '奉命镇压的州府兵丁',
+        pattern: [{ type: 'block', block: 6 }, { type: 'atk', dmg: D(1, 10, 3) }, { type: 'atk', dmg: D(1, 10, 3) }] },
+    { id: 'archer', name: '弓手', visual: 'tinker', maxHp: 31, ac: 12, atk: 5, save: 1, insight: 11, gold: [7, 11],
+        desc: '远程放箭，无视站位',
+        pattern: [{ type: 'atk', dmg: D(1, 8, 3), ranged: true },
+            { type: 'hex', status: 'bleed', amount: 3, save: 'dex', dc: 12 },
+            { type: 'atk', dmg: D(1, 8, 3), ranged: true }] },
+    { id: 'poisoner', name: '毒师', visual: 'alch', maxHp: 31, ac: 11, atk: 4, save: 2, insight: 12, gold: [7, 11],
+        desc: '豪强豢养的用毒高手',
+        pattern: [{ type: 'hex', status: 'poison', amount: 4, save: 'con', dc: 12 },
+            { type: 'atk', dmg: D(1, 6, 3), ranged: true },
+            { type: 'hex', status: 'poison', amount: 4, save: 'con', dc: 12 }] },
 ];
 exports.ELITES = [
-    { id: 'lich', name: '厄运巫妖', maxHp: 72, goldMin: 40, goldMax: 55, elite: true, desc: '诅咒会让你下回合少一颗骰子',
-        pattern: [{ type: 'curse' }, { type: 'atk', dmg: 9 }, { type: 'atk', dmg: 5, hits: 2 }, { type: 'block', block: 10 }] },
-    { id: 'troll', name: '山岭巨魔', maxHp: 86, goldMin: 40, goldMax: 60, elite: true, desc: '留意它的意图：蓄力重击高达 16 点',
-        pattern: [{ type: 'atk', dmg: 6 }, { type: 'atk', dmg: 16 }, { type: 'block', block: 8 }] },
+    { id: 'chief', name: '悍匪头目', visual: 'troll', maxHp: 100, ac: 14, atk: 6, save: 2, insight: 13, gold: [20, 30], elite: true,
+        desc: '留意危险区域：横扫全队',
+        pattern: [{ type: 'atk', dmg: D(2, 6, 4) }, { type: 'charge', amount: 4 },
+            { type: 'aoe', dmg: D(2, 6, 2), save: 'dex', dc: 13 }] },
+    { id: 'sorcerer', name: '妖道', visual: 'pyro', maxHp: 86, ac: 12, atk: 6, save: 3, insight: 13, gold: [20, 30], elite: true,
+        desc: '符咒惑人，会震慑与焚烧',
+        pattern: [{ type: 'hex', status: 'stun', amount: 1, save: 'wis', dc: 13 },
+            { type: 'aoe', dmg: D(2, 6, 2), save: 'dex', dc: 13 },
+            { type: 'hex', status: 'burn', amount: 2, save: 'dex', dc: 13 },
+            { type: 'atk', dmg: D(2, 6, 3), ranged: true }] },
 ];
-exports.BOSS = {
-    id: 'boss', name: '骰命魔龙', maxHp: 130, goldMin: 90, goldMax: 120, boss: true,
-    desc: '盘踞龙巢的远古巨龙。血量过半时狂暴（力量+3）',
-    pattern: [
-        { type: 'atk', dmg: 10 }, { type: 'atkblock', dmg: 6, block: 10 },
-        { type: 'atk', dmg: 4, hits: 3 }, { type: 'curse' }, { type: 'buff', str: 2 },
-    ],
-};
-// 四关首领（立绘复用普通怪，visual 字段指定）
 exports.BOSSES = [
-    { id: 'trollking', name: '森林巨魔王', maxHp: 72, goldMin: 55, goldMax: 75, boss: true, visual: 'troll',
-        desc: '黑森林的统治者。血量过半时狂暴（力量+3）',
-        pattern: [{ type: 'atk', dmg: 7 }, { type: 'atkblock', dmg: 5, block: 8 }, { type: 'atk', dmg: 16 }, { type: 'buff', str: 1 }] },
-    { id: 'golemking', name: '古堡魔像', maxHp: 88, goldMin: 65, goldMax: 85, boss: true, visual: 'golem',
-        desc: '古堡深处的守门巨石。血量过半时狂暴（力量+3）',
-        pattern: [{ type: 'block', block: 10 }, { type: 'atk', dmg: 12 }, { type: 'atk', dmg: 5, hits: 2 }, { type: 'atkblock', dmg: 8, block: 10 }, { type: 'buff', str: 1 }] },
-    { id: 'lichking', name: '深渊巫妖王', maxHp: 100, goldMin: 75, goldMax: 95, boss: true, visual: 'lich',
-        desc: '地穴深处的亡者之主。血量过半时狂暴（力量+3）',
-        pattern: [{ type: 'curse' }, { type: 'atk', dmg: 10 }, { type: 'atk', dmg: 6, hits: 2 }, { type: 'block', block: 12 }, { type: 'atk', dmg: 13 }] },
-    exports.BOSS,
+    { id: 'zhenfu', name: '青州镇抚使', visual: 'golem', maxHp: 180, ac: 15, atk: 6, save: 3, insight: 14, gold: [45, 60], boss: true,
+        desc: '横征暴敛的州府重臣。血量过半时狂暴（伤害+2）',
+        pattern: [{ type: 'atk', dmg: D(1, 10, 5) }, { type: 'block', block: 8 },
+            { type: 'aoe', dmg: D(2, 6, 4), save: 'dex', dc: 13 }, { type: 'charge', amount: 5 },
+            { type: 'hex', status: 'sunder', amount: 2, save: 'con', dc: 13 }] },
+    { id: 'zhenbei', name: '镇北将军', visual: 'troll', maxHp: 220, ac: 16, atk: 7, save: 4, insight: 15, gold: [55, 70], boss: true,
+        desc: '铁甲重骑的统帅。血量过半时狂暴（伤害+2）',
+        pattern: [{ type: 'block', block: 10 }, { type: 'atk', dmg: D(2, 6, 5), hits: 2 },
+            { type: 'charge', amount: 6 }, { type: 'aoe', dmg: D(2, 8, 2), save: 'dex', dc: 14 }] },
+    { id: 'heishui', name: '黑水寨主', visual: 'viper', maxHp: 245, ac: 15, atk: 7, save: 4, insight: 15, gold: [60, 80], boss: true,
+        desc: '盘踞峡谷的枭雄，翻脸比翻书快。血量过半时狂暴（伤害+2）',
+        pattern: [{ type: 'hex', status: 'poison', amount: 4, save: 'con', dc: 14 }, { type: 'atk', dmg: D(1, 12, 6) },
+            { type: 'aoe', dmg: D(2, 8, 2), save: 'dex', dc: 14 },
+            { type: 'hex', status: 'fear', amount: 2, save: 'wis', dc: 14 }] },
+    { id: 'quanxiang', name: '大晟权相', visual: 'lich', maxHp: 285, ac: 16, atk: 8, save: 5, insight: 16, gold: [80, 100], boss: true,
+        desc: '把持朝政的权相，禁军听其号令。血量过半时狂暴（伤害+2）',
+        pattern: [{ type: 'hex', status: 'stun', amount: 1, save: 'wis', dc: 15 },
+            { type: 'aoe', dmg: D(3, 6, 2), save: 'dex', dc: 15 }, { type: 'atk', dmg: D(2, 8, 6) },
+            { type: 'block', block: 12 }, { type: 'charge', amount: 6 }] },
 ];
 exports.STAGES = [
-    { name: '黑森林', boss: exports.BOSSES[0], color: [28, 44, 30] },
-    { name: '古 堡', boss: exports.BOSSES[1], color: [48, 46, 52] },
-    { name: '地 穴', boss: exports.BOSSES[2], color: [40, 54, 66] },
-    { name: '龙 巢', boss: exports.BOSSES[3], color: [62, 26, 22] },
+    { name: '青州·烽烟初起', short: '青 州', boss: exports.BOSSES[0], color: [32, 46, 34], goal: '击败青州镇抚使，建立第一个稳定据点' },
+    { name: '汉北·破阵渡江', short: '汉 北', boss: exports.BOSSES[1], color: [52, 48, 40], goal: '击败镇北将军，夺取关键府城' },
+    { name: '黑水谷·群雄逐鹿', short: '黑水谷', boss: exports.BOSSES[2], color: [30, 42, 50], goal: '击败黑水寨主，控制战略要地' },
+    { name: '洛阳·覆灭旧朝', short: '洛 阳', boss: exports.BOSSES[3], color: [60, 28, 24], goal: '攻入洛阳，终结旧朝' },
 ];
-/** 关卡难度缩放：生命 +20%/关，攻击 +1/关，格挡 +1/关，金币 +5/关（游戏与模拟器共用）。 */
+/** 区域难度缩放（游戏与模拟器共用）：生命 +20%/区，命中/伤害/格挡/DC +1/区，防御 +1/两区。 */
 function scaleEnemy(def, stage) {
     if (stage <= 0) {
         return def;
     }
     return {
         ...def,
-        maxHp: Math.round(def.maxHp * (1 + 0.15 * stage)),
-        goldMin: def.goldMin + stage * 5,
-        goldMax: def.goldMax + stage * 5,
+        maxHp: Math.round(def.maxHp * (1 + 0.25 * stage)),
+        ac: def.ac + Math.floor(stage / 2),
+        atk: def.atk + stage,
+        save: def.save + stage,
+        insight: def.insight + stage,
+        gold: [def.gold[0] + stage * 3, def.gold[1] + stage * 3],
         pattern: def.pattern.map((it) => ({
             ...it,
-            dmg: it.dmg !== undefined ? it.dmg + stage : it.dmg,
+            dmg: it.dmg ? { ...it.dmg, b: (it.dmg.b || 0) + stage } : it.dmg,
             block: it.block !== undefined ? it.block + stage : it.block,
+            dc: it.dc !== undefined ? it.dc + stage : it.dc,
         })),
     };
 }
+/** 生成遭遇：普通 2 敌（后两区 3 敌），精英 = 精英 + 1 杂兵，首领 = 首领（第二区起 + 1 杂兵）。 */
+function encounter(kind, stage, rng) {
+    const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+    const out = [];
+    if (kind === 'boss') {
+        out.push(exports.STAGES[stage].boss);
+        if (stage >= 1) {
+            out.push(scaleEnemy(pick(exports.NORMAL_ENEMIES), stage));
+        }
+    }
+    else if (kind === 'elite') {
+        out.push(scaleEnemy(pick(exports.ELITES), stage), scaleEnemy(pick(exports.NORMAL_ENEMIES), stage));
+    }
+    else {
+        const n = stage >= 2 ? 3 : 2;
+        for (let i = 0; i < n; i++) {
+            out.push(scaleEnemy(pick(exports.NORMAL_ENEMIES), stage));
+        }
+    }
+    return out;
+}
+/** 战后三选一：武器升品 / 换新武器（改变战斗流派）/ 伤药或强身。 */
+function rewardOptions(party, rng, bonusQ = 0) {
+    const pickHero = (ok) => {
+        const idx = party.map((h, i) => i).filter((i) => ok(party[i]));
+        return idx.length ? idx[Math.floor(rng() * idx.length)] : -1;
+    };
+    const out = [];
+    const up = pickHero((h) => h.weapon.q < 2);
+    if (up >= 0) {
+        out.push({ kind: 'upgrade', hero: up });
+    }
+    const wh = pickHero((h) => h.def.weapons.length > 1);
+    if (wh >= 0) {
+        const kinds = party[wh].def.weapons.filter((k) => k !== party[wh].weapon.id);
+        const q = Math.min(2, bonusQ + (rng() < 0.3 ? 1 : 0));
+        out.push({ kind: 'weapon', hero: wh, w: { id: kinds[Math.floor(rng() * kinds.length)], q } });
+    }
+    out.push(rng() < 0.5 ? { kind: 'heal', pct: 0.3 } : { kind: 'vigor', hero: pickHero(() => true), amt: 4 });
+    while (out.length < 3) {
+        out.push({ kind: 'vigor', hero: pickHero(() => true), amt: 4 });
+    }
+    return out;
+}
+function rewardText(party, r) {
+    switch (r.kind) {
+        case 'upgrade': {
+            const h = party[r.hero];
+            return h.def.name + '：' + weaponName(h.weapon) + ' → ' + weaponName({ id: h.weapon.id, q: h.weapon.q + 1 });
+        }
+        case 'weapon': {
+            const wd = weaponById(r.w.id);
+            return party[r.hero].def.name + ' 换装 ' + weaponName(r.w) + '（1D' + wd.die + '，' + wd.desc + '）';
+        }
+        case 'heal': return '伤药：全队恢复 ' + Math.round(r.pct * 100) + '% 生命';
+        case 'vigor': return party[r.hero].def.name + ' 强身：生命上限 +' + r.amt;
+    }
+    return '';
+}
+function applyReward(party, r) {
+    switch (r.kind) {
+        case 'upgrade':
+            party[r.hero].weapon.q = Math.min(2, party[r.hero].weapon.q + 1);
+            break;
+        case 'weapon':
+            party[r.hero].weapon = { id: r.w.id, q: r.w.q };
+            break;
+        case 'heal':
+            for (const h of party) {
+                h.hp = Math.min(h.maxHp, Math.max(1, h.hp) + Math.round(h.maxHp * r.pct));
+            }
+            break;
+        case 'vigor':
+            party[r.hero].maxHp += r.amt;
+            party[r.hero].hp += r.amt;
+            break;
+    }
+}
 exports.EVENTS = [
-    { id: 'meteor', title: '流星坠夜', text: '一颗骰形的陨星砸落营地旁，余温尚在。',
-        options: [{ label: '拾取星屑（+45 金币）', apply: 'gold45' }, { label: '对星许愿（恢复 25% 生命）', apply: 'heal25' }] },
-    { id: 'altar', title: '废弃祭坛', text: '古老的祭坛上刻着：以血换运。',
-        options: [{ label: '献上鲜血（失去 15% 生命，每回合 +1 骰子）', apply: 'blooddie' }, { label: '默默离开', apply: 'none' }] },
-    { id: 'well', title: '回声古井', text: '井水清澈，投入硬币会听见骰子落盘的声音。',
-        options: [{ label: '饮下井水（恢复 20% 生命）', apply: 'heal20' }, { label: '投入 30 金币（获得一张稀有卡）', apply: 'buyrare' }] },
+    { id: 'river', title: '渡河', text: '洪水退后的大河拦住去路，对岸隐约有官兵巡逻的火光。',
+        options: [
+            { label: '观察水流，寻找渡点', attr: 'wis', dc: 12,
+                ok: { text: '找到浅滩，悄然渡河', gold: 10 }, fail: { text: '踩空落水，全队受寒', dmgAll: 4 },
+                crit: { text: '发现上游的走私船，顺手牵来物资', gold: 30, healPct: 0.1 } },
+            { label: '砍伐木材，搭建木筏', attr: 'str', dc: 13,
+                ok: { text: '木筏结实，平安渡河', healPct: 0.1 }, fail: { text: '木筏散架，物资冲走', gold: -10, dmgAll: 2 } },
+            { label: '规划渡河顺序与警戒路线', attr: 'int', dc: 12,
+                ok: { text: '避开巡逻，全队养精蓄锐', healPct: 0.15 }, fail: { text: '被巡逻发现，被迫迎战', fight: true } },
+        ] },
+    { id: 'granary', title: '粮仓潜入', text: '豪强的粮仓囤满了灾民的口粮，守卫正在换岗。',
+        options: [
+            { label: '趁换岗潜入', attr: 'dex', dc: 15,
+                ok: { text: '扛出粮食分给流民', gold: 25, healPct: 0.2 }, fail: { text: '惊动守卫，被迫迎战', fight: true },
+                crit: { text: '顺走了库房里的兵器', weapon: true, gold: 20 } },
+            { label: '伪装成运粮民夫', attr: 'cha', dc: 14,
+                ok: { text: '大摇大摆运走一车粮', gold: 35 }, fail: { text: '露馅挨了一顿棍棒', dmgAll: 5 } },
+            { label: '寻找排水暗道', attr: 'int', dc: 13,
+                ok: { text: '从暗道搬空了半个粮仓', gold: 20, healPct: 0.15 }, fail: { text: '暗道塌方，一人受伤', dmgOne: 8 } },
+        ] },
+    { id: 'ruins', title: '机关遗迹', text: '山腹中的前朝工坊，石门上布满机括与铜锁。',
+        options: [
+            { label: '以智力破解机关', attr: 'int', dc: 13,
+                ok: { text: '石门洞开，里面藏着兵器', weapon: true }, fail: { text: '触发暗弩，全队负伤', dmgAll: 5 },
+                crit: { text: '破解秘藏，得到上乘兵器与图谱', weapon: true, maxHp: 2 } },
+            { label: '以感知寻找隐藏机关', attr: 'wis', dc: 12,
+                ok: { text: '避开陷阱，拾得遗金', gold: 25 }, fail: { text: '踩中翻板，一人受伤', dmgOne: 7 } },
+            { label: '不碰为妙，绕道离开', attr: 'wis', dc: 5,
+                ok: { text: '安全离开' }, fail: { text: '安全离开' } },
+        ] },
+    { id: 'refugees', title: '流民营', text: '路边的流民营里，老人和孩子在病痛中呻吟。',
+        options: [
+            { label: '安抚人心，请他们指路', attr: 'cha', dc: 10,
+                ok: { text: '流民送来向导与干粮', healPct: 0.2 }, fail: { text: '流民疑心重重，空手而归' } },
+            { label: '施医救治病患', attr: 'wis', dc: 12,
+                ok: { text: '病患好转，乡亲以全部积蓄相谢', gold: 20, maxHp: 2 }, fail: { text: '耗尽药材，自己也染了病', dmgAll: 3 } },
+            { label: '以力服众，清理营地恶霸', attr: 'str', dc: 13,
+                ok: { text: '恶霸被逐，流民感激涕零', gold: 15, healPct: 0.1 }, fail: { text: '恶霸纠集同伙动手', fight: true } },
+        ] },
 ];
 // 地图横坐标槽位（竖屏）
 exports.COLUMN_X = [-240, -80, 80, 240];
 // ---------------- 规则常量 ----------------
 exports.RULES = {
     dicePerTurn: 3,
-    handSize: 5,
-    maxDice: 6,
-    maxHand: 8,
-    recruitCost: 100,
-    bossEnrageAt: 0.5,
-    bossEnrageStr: 3,
-    shadowOddBonus: 2,
-    pyroSixBonus: 4,
-    alchPoisonBonus: 1,
-    clericWinHeal: 6,
-    restHealPct: 0.3,
+    initDc: 12, // 先手：全队最高敏捷修正 + D20 ≥ 12 则我方先手
+    enrageAt: 0.5,
+    enrageDmg: 2,
+    stageHeal: 0.4, // 通过区域恢复
+    battleHeal: 0.3, // 每场胜利后包扎恢复
+    restHeal: 0.4,
+    reviveHp: 1, // 战斗胜利后倒下的角色以 1 点生命归队
 };
 exports.NODE_NAME = {
     battle: '遭遇战', elite: '精英战', treasure: '宝箱', event: '奇遇', rest: '营火', boss: '首领',
 };
-/** 掷骰定运：1-3 平运 / 4-5 好运 / 6 天运 */
-function fateTier(roll) {
-    return roll <= 3 ? 1 : roll <= 5 ? 2 : 3;
-}
-// [tier1, tier2, tier3] → [敌血削减比例, 首回合额外骰子]
-const FATE_BATTLE = {
-    battle: [[0, 0], [0.10, 0], [0.20, 1]],
-    elite: [[0, 0], [0.08, 0], [0.15, 1]],
-    boss: [[0, 0], [0.05, 0], [0.10, 1]],
-};
-/** 战斗节点的命运增益（游戏与模拟器共用）。 */
-function fateBattleEntry(kind, tier) {
-    const e = (FATE_BATTLE[kind] || FATE_BATTLE.battle)[tier - 1];
-    return { hpCut: e[0], firstDie: e[1] };
-}
-/** 命运掷骰结果文案：第一行运势名，第二行增益说明。 */
-function fateLines(kind, tier) {
-    const t = tier === 3 ? '天 运 ！' : tier === 2 ? '好 运' : '平 运';
-    const cut = (FATE_BATTLE[kind] || [0])[tier - 1];
-    switch (kind) {
-        case 'battle':
-        case 'elite':
-        case 'boss':
-            return [t, tier === 1 ? '此行无额外增益'
-                    : '敌军开局生命 -' + Math.round(cut[0] * 100) + '%' + (cut[1] ? '，首回合 +1 骰' : '')];
-        case 'treasure':
-            return [t, tier === 1 ? '箱中无惊喜' : tier === 2 ? '开箱收益提升' : '开箱收益大幅提升'];
-        case 'rest':
-            return [t, tier === 1 ? '营火恢复 30%' : tier === 2 ? '营火恢复 45%' : '营火恢复 60%，磨砺亦回血'];
-        default:
-            return [t, tier === 1 ? '事件照常进行' : tier === 2 ? '事件收益 ×1.5' : '事件收益 ×2'];
-    }
-}

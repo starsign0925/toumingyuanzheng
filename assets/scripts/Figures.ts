@@ -545,11 +545,6 @@ export function buildRig(parent: Node, id: string, size: number, x: number, y: n
     return { id, root, flip, body, arm, parts, u, size, enemy, spec };
 }
 
-/** 仅绘制静态立绘（无动画），用于名册/卡片头像。 */
-export function buildPortrait(parent: Node, id: string, size: number, x: number, y: number, enemy = false): Rig {
-    return buildRig(parent, id, size, x, y, enemy);
-}
-
 // ---------------- 坐标 ----------------
 
 export function posIn(layer: Node, node: Node, lx = 0, ly = 0): Vec3 {

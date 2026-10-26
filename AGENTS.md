@@ -1,59 +1,56 @@
-# 骰命远征（Dice Fate Expedition）
+# 烽火长歌（乱世聚义，骰定天下）
 
-轻度策略掷骰 Roguelike —— Cocos Creator 3.8.8 项目。
+中式战术 RPG + Roguelike —— Cocos Creator 3.8.8 项目（原《骰命远征》原地改造，旧版见 git 历史 `fdcc522` 及之前）。
+设计基线：《烽火长歌》设计定稿 V1.5。当前进度：**第一阶段 战斗原型**。
 
 ## 运行方式
 
 - 编辑器安装路径：`D:\cocos\Creator\3.8.8\CocosCreator.exe`
-- 用 Cocos Dashboard / 编辑器打开本目录，双击 `assets/scene/Main.scene`，点「预览」即可运行（设计分辨率 720×1280）。
-- 所有 UI 均为代码构建（Graphics + Label），项目不需要任何图片/预制体资源。
+- 用编辑器打开本目录，双击 `assets/scene/Main.scene`，点「预览」即可运行（竖屏 720×1280）。
+- 所有 UI 均为代码构建（Graphics + Label），不需要图片/预制体；立绘暂时复用 `Figures.ts` 的矢量角色（水墨美术为后续阶段）。
 
 ## 代码结构（assets/scripts/）
 
 | 文件 | 职责 |
 |------|------|
-| `Data.ts` | 全部数值表与类型：8 名英雄、敌人/精英/首领、事件池、规则常量 `RULES` |
-| `UI.ts` | 纯代码 UI 组件工厂：面板、按钮（SCALE 反馈）、骰子（Graphics 画点数）、血条 |
-| `BattleScreen.ts` | 战斗主循环：掷骰 → 选骰 → 技能调整 → 结算 → 敌方掷骰；厄运/命运/战术点系统 |
-| `GameMain.ts` | 场景入口组件：营地 / 编队 / 远征地图 / 事件 / 宝箱 / 结算 / 招募 / 存档 |
+| `DiceSystem.ts` | D20（优势/劣势）、每人独立 3D6 骰池、骰槽与组合识别（对子/三条/顺子）、自动支付 |
+| `RuleResolver.ts` | 属性修正 ⌊(属性−10)/2⌋、DC 检定 / 命中 / 豁免、天然 20/1 |
+| `Data.ts` | 四名主角、武器、技能、状态、敌人意图、四大区域、探索事件、战利品、`RULES` |
+| `BattleCore.ts` | 纯战斗规则：回合、行动额度（移动/主要/附赠/反应）、前后排、意图执行、状态结算 |
+| `BattleAI.ts` | 贪心 AI：自动战斗与模拟器共用 |
+| `BattleScreen.ts` | 战斗界面：敌人+意图徽章、三名角色、当前行动者的骰池与技能 |
+| `GameMain.ts` | 入口：营地四选三 / 三路线地图 / D20 事件检定 / 战利品 / 结算 / 存档 |
+| `UI.ts` / `Figures.ts` | UI 组件工厂（含 `drawD20`）/ 矢量角色与攻击动画 |
+
+规则层（Dice/Rule/Data/BattleCore/BattleAI）不得依赖 `cc`，模拟器直接复用。
 
 ## 核心规则
 
-- 每回合掷 5 颗骰子；6=暴击×2，1-2=落空且各 +1 厄运/命运。
-- 厄运满 3 → 敌人追加一击；命运满 3 → 可免费全骰重掷（坏运气保底）。
-- 战术点（TP）每回合 3 点，用于重掷所选骰子或发动英雄技能。
-- 技能流派：占星师=全骰重掷、铁壁卫=低点转护盾、赌徒=掷1攒筹码换骰、炼金=同点数融合升点、影行者=奇数骰加伤返TP、圣愈者=低点转治疗、烈焰=指定骰变6、机关师=复制骰子。
-- 存档：`sys.localStorage` key `dfx_save_v1`（金币 + 已招募英雄）。
+- 开局四选三（裴烈/沈知远/叶青/许怀仁），本次战役不可更换。
+- 每名角色每回合独立掷 3D6，骰子不能互换，未用骰子回合结束作废；技能按骰槽支付，X = 骰面（组合取最大）。
+- D20 决定成败；武器骰（D4–D10）结算伤害；每人每回合：移动 1、主要 1、附赠 1、反应每轮 1。
+- 近战武器需在前排（长枪可后排）；敌人单体近战优先打前排，远程/冲锋可打后排。
+- 敌人意图需「识破/侦察」检定成功才显示数值。
+- 存档：`sys.localStorage` key `fhcg_save_v1`（钱 + 各角色战绩）；只有通关才带回钱。
 
-## 当前设计（竖屏单人冒险 · 720×1280）
-
-- 战斗为「骰子×卡牌」：每回合掷 3 骰 + 抽 5 牌，把骰子放进卡牌骰槽触发效果；敌人为杀戮尖塔式意图循环（头顶显示下回合行动）
-- `Data.ts`：卡牌表（slot/type/desc）、8 英雄（被动+专属卡）、敌人意图 pattern、`rewardOptions` 奖励池
-- `BattleCore.ts`：纯规则（牌堆/手牌/骰子/意图/中毒/狂暴）；`BattleAI.ts`：贪心出牌 + 选牌，游戏自动战斗与模拟器共用
-- `Figures.ts`：欧式角色矢量绘制 + 专属攻击动画；地图为三条独立路线（LANES 槽位走廊）
-- 四关通关：黑森林(森林巨魔王)→古堡(古堡魔像)→地穴(深渊巫妖王)→龙巢(骰命魔龙)；每关 5 行路线+首领，过关恢复 40% 生命；普通/精英敌人按关 `scaleEnemy`（生命+15%/关、攻击+1/关、格挡+1/关）；非龙首领用 `visual` 字段复用普通怪立绘
-- 命运掷骰：进节点先掷骰定档（1-3 平运 / 4-5 好运 / 6 天运），战斗节点扣敌血 / 首回合加骰（`fateBattleEntry`），宝箱·营火·事件各有加成；战后奖励掷骰：1-3 选 1 张普通卡、4-5 选 2 张、6 进稀有池（精英升一档）
-- 出牌演出：骰子飞入骰槽 + 卡牌飞向目标（`BattleScreen.playFx`）；`cardPick` 支持多选（picks 参数）
-- `GameMain.ts`：营地选人/招募（战绩存 `save.trials`）、分支地图、战斗奖励 3 选 1、宝箱/营火/奇遇、结算
-
-## 平衡模拟
+## 平衡模拟 / 验收自测
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/sim.ps1 3000            # 完整报告（每英雄通关率+死因分布）
-powershell -ExecutionPolicy Bypass -File tools/sim.ps1 600 calib 0.5   # 生命校准，建议各英雄 HP
+powershell -ExecutionPolicy Bypass -File tools/sim.ps1 600             # 验收自测 + 四种阵容通关报告
+powershell -ExecutionPolicy Bypass -File tools/sim.ps1 1 selftest      # 只跑第一阶段验收自测
 ```
-当前基准：各英雄通关 46.3–54.7%（差距 8.4 点，四关全破）。改数值后务必重跑。
+当前基准：自测 24/24；四阵容通关 58–81%（平均 68%，无前排阵容最难）。难度旋钮：`Data.ts` 中 `ENEMY_DMG`。
 
 ## Web 构建与试玩
 
+构建前必须清掉 `ELECTRON_RUN_AS_NODE`，否则编辑器会被当成 node 运行（报 `bad option: --project`）：
+
 ```powershell
-& "D:\cocos\Creator\3.8.8\CocosCreator.exe" --project . --build "platform=web-mobile;debug=true;outputName=web;buildPath=build;orientation=portrait"
+Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue; & "D:\cocos\Creator\3.8.8\CocosCreator.exe" --project . --build "platform=web-mobile;debug=true;outputName=web;buildPath=build;orientation=portrait"
 $env:ELECTRON_RUN_AS_NODE='1'; & "D:\cocos\Creator\3.8.8\CocosCreator.exe" serve.js build/web 8787
 ```
 
 ## 类型检查
-
-本机无 Node，可用编辑器内置 TypeScript 检查脚本：
 
 ```powershell
 $env:ELECTRON_RUN_AS_NODE='1'
@@ -62,10 +59,11 @@ $env:ELECTRON_RUN_AS_NODE='1'
 
 ## 手写资产注意
 
-- `assets/` 下的 `.meta` / `.scene` 均为手写，uuid 已固定，编辑器首次打开会校验格式，勿改 uuid 以免断场景引用（`GameMain` 脚本 uuid = `87b9a10a-2da1-4ebf-9db9-ef48a60bb1d5`）。
+- `assets/` 下的 `.meta` / `.scene` 均为手写，uuid 已固定，勿改（`GameMain` 脚本 uuid = `87b9a10a-2da1-4ebf-9db9-ef48a60bb1d5`）。新脚本需同步新建 `.meta`。
+- GitHub 推送需走本机代理：`git -c http.proxy=http://127.0.0.1:7897 push origin master`
 
-## 未实现（设计文档中的后续项）
+## 后续阶段（设计 13.2）
 
-- 无尽模式、皮肤/商城、每日任务、赛季、排行榜
-- 英雄升星/碎片养成（当前招募=直接解锁）
-- 骰面收集成长（当前骰子类型由技能转化产生）
+- 第二阶段：营地、探索原型（渡河/砍树/潜入/交涉的完整事件链）
+- 第三阶段：青州第一章主线、装备成长、营地设施
+- 第四/五阶段：势力与领地、民心与结局；联机准备

@@ -1,162 +1,201 @@
-// 骰命远征 —— 平衡性模拟器（单人冒险 · 骰子卡牌）
-// 用与游戏完全相同的 BattleCore + BattleAI 批量跑远征，输出各英雄通关率。
+// 烽火长歌 —— 平衡模拟器 + 第一阶段验收自测（复用游戏的 BattleCore / BattleAI / Data）
+// 用法：sim.ps1 [每阵容局数] [report|selftest]
+import { makeHero, heroById, encounter, STAGES, RULES, rewardOptions, applyReward, PARTY_NOTES, weaponById } from '../assets/scripts/Data';
+import type { HeroInst, NodeKind, EnemyDef } from '../assets/scripts/Data';
 import { BattleCore } from '../assets/scripts/BattleCore';
-import { planMove, pickRewards } from '../assets/scripts/BattleAI';
-import {
-    HEROES, NORMAL_ENEMIES, ELITES, BOSS, RULES, makeHero, starterDeck, rewardOptions,
-    fateTier, fateBattleEntry, STAGES, scaleEnemy,
-} from '../assets/scripts/Data';
-import type { EnemyDef, HeroDef, HeroInst, RunBuffs, BattleEntry, NodeKind } from '../assets/scripts/Data';
+import { planStep, runPlan, pickReward } from '../assets/scripts/BattleAI';
+import { slotValid, findPayment } from '../assets/scripts/DiceSystem';
+import type { Die } from '../assets/scripts/DiceSystem';
+import { mod } from '../assets/scripts/RuleResolver';
 
 declare const process: { argv: string[] };
 declare const console: { log: (...a: unknown[]) => void };
 
-function mulberry32(seed: number) {
-    return function () {
-        seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
-        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+function mulberry32(seed: number): () => number {
+    let a = seed >>> 0;
+    return () => {
+        a = (a + 0x6D2B79F5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
         return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
 }
 
-const STAT = { fights: 0, rounds: 0, plays: 0 };
-
-function fight(hero: HeroInst, deck: string[], enemy: EnemyDef, buffs: RunBuffs,
-    rng: () => number, entry?: BattleEntry): boolean {
-    const core = new BattleCore(hero, deck, enemy, buffs, rng, entry);
-    STAT.fights++;
-    for (let round = 0; round < 60; round++) {
-        core.startTurn();
-        for (let step = 0; step < 30; step++) {
-            const m = planMove(core);
-            if (!m) { break; }
-            core.play(m.card, m.die);
-            STAT.plays++;
-            if (core.enemyHp <= 0) { STAT.rounds += core.round; return true; }
+function fight(party: HeroInst[], enemies: EnemyDef[], rng: () => number): { won: boolean; rounds: number } {
+    const core = new BattleCore(party, enemies, rng);
+    if (!core.initiative().success) { core.endRound(); }
+    while (!core.over && core.round < 40) {
+        core.startRound();
+        for (let guard = 0; guard < 30 && !core.over; guard++) {
+            const p = planStep(core);
+            if (!p || !runPlan(core, p)) { break; }
         }
-        const r = core.endTurn();
-        if (r.enemyDead) { STAT.rounds += core.round; return true; }
-        if (r.heroDead) { return false; }
+        if (core.over) { break; }
+        core.endRound();
     }
-    return false;
+    return { won: core.over === 'win', rounds: core.round };
 }
 
-// 每关典型路线：5 个节点 + 首领（与地图生成的平均构成接近）
-const STAGE_ROUTE = ['battle', 'battle', 'battle', 'elite', 'rest', 'boss'];
+const STAGE_ROUTE: NodeKind[] = ['battle', 'battle', 'event', 'elite', 'rest', 'boss'];
 
-interface RunOut { cleared: boolean; depth: number; diedAt: string; deck: number; }
+interface RunOut { cleared: boolean; depth: number; diedAt: string; rounds: number; fights: number; }
 
-function run(def: HeroDef, rng: () => number): RunOut {
-    const hero = makeHero(def);
-    const deck = starterDeck(def);
-    const buffs: RunBuffs = { extraDie: 0 };
-    let depth = 0;
+function run(ids: string[], rng: () => number): RunOut {
+    const party = ids.map((id) => makeHero(heroById(id)));
+    let depth = 0, rounds = 0, fights = 0;
     for (let s = 0; s < STAGES.length; s++) {
         for (const node of STAGE_ROUTE) {
-            let enemy: EnemyDef | null = null;
-            if (node === 'battle') { enemy = scaleEnemy(NORMAL_ENEMIES[Math.floor(rng() * NORMAL_ENEMIES.length)], s); }
-            if (node === 'elite') { enemy = scaleEnemy(ELITES[Math.floor(rng() * ELITES.length)], s); }
-            if (node === 'boss') { enemy = STAGES[s].boss; }
-            if (node === 'event') { hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.2); }
-            if (node === 'rest') {
-                if (hero.hp < hero.maxHp * 0.7) {
-                    hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * RULES.restHealPct);
-                } else {
-                    const i = deck.indexOf('strike');
-                    if (i >= 0) { deck.splice(i, 1); }
-                }
-            }
-            if (enemy) {
-                const tier = fateTier(1 + Math.floor(rng() * 6));
-                if (!fight(hero, deck, enemy, buffs, rng, fateBattleEntry(node as NodeKind, tier))) {
-                    return { cleared: false, depth, diedAt: enemy.id, deck: deck.length };
-                }
-                if (def.id === 'cleric') { hero.hp = Math.min(hero.maxHp, hero.hp + RULES.clericWinHeal); }
-                if (node === 'boss' && s < STAGES.length - 1) {
-                    hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.4); // 过关恢复 40%
+            if (node === 'battle' || node === 'elite' || node === 'boss') {
+                const r = fight(party, encounter(node, s, rng), rng);
+                rounds += r.rounds; fights++;
+                if (!r.won) { return { cleared: false, depth, diedAt: node, rounds, fights }; }
+                for (const h of party) {
+                    h.hp = h.hp <= 0 ? RULES.reviveHp : Math.min(h.maxHp, h.hp + Math.round(h.maxHp * RULES.battleHeal));
                 }
                 if (node !== 'boss') {
-                    let rt = tier;
-                    if (node === 'elite' && rt < 3) { rt += 1; }
-                    const picks = pickRewards(rewardOptions(def.id, rng, rt === 3), deck.length, rt === 2 ? 2 : 1);
-                    for (const p of picks) { deck.push(p); }
+                    applyReward(party, pickReward(party, rewardOptions(party, rng, node === 'elite' ? 1 : 0)));
                 }
+            } else if (node === 'event') {
+                for (const h of party) { h.hp = Math.min(h.maxHp, h.hp + Math.round(h.maxHp * 0.1)); }
+            } else if (node === 'rest') {
+                for (const h of party) { h.hp = Math.min(h.maxHp, h.hp + Math.round(h.maxHp * RULES.restHeal)); }
             }
             depth++;
         }
+        for (const h of party) { h.hp = Math.min(h.maxHp, h.hp + Math.round(h.maxHp * RULES.stageHeal)); }
     }
-    return { cleared: true, depth, diedAt: '', deck: deck.length };
+    return { cleared: true, depth, diedAt: '', rounds, fights };
 }
 
-function pct(n: number, d: number): string {
-    return (d === 0 ? 0 : (100 * n / d)).toFixed(1).padStart(5) + '%';
-}
+function pct(n: number, d: number): string { return ((100 * n) / Math.max(1, d)).toFixed(1).padStart(5) + '%'; }
 
-function duel(def: HeroDef, e: EnemyDef, n: number, rng: () => number): number {
-    let w = 0;
-    for (let i = 0; i < n; i++) {
-        if (fight(makeHero(def), starterDeck(def), e, { extraDie: 0 }, rng)) { w++; }
-    }
-    return w / n;
-}
-
-function calibrate(target: number, runs: number) {
-    console.log('=== 生命校准：通关率目标 ' + (target * 100).toFixed(0) + '%（每次评估 ' + runs + ' 局，固定种子） ===');
-    for (const def of HEROES) {
-        const rate = (hp: number) => {
-            const rng = mulberry32(777);
-            const d = { ...def, maxHp: Math.round(hp) };
-            let c = 0;
-            for (let i = 0; i < runs; i++) { if (run(d, rng).cleared) { c++; } }
-            return c / runs;
-        };
-        let lo = 20, hi = 200;
-        for (let it = 0; it < 12; it++) {
-            const mid = (lo + hi) / 2;
-            if (rate(mid) < target) { lo = mid; } else { hi = mid; }
-        }
-        const sug = Math.round(hi);
-        console.log(def.name.padEnd(6, '　') + ' 当前HP ' + String(def.maxHp).padStart(3) +
-            ' → 建议HP ' + String(sug).padStart(3) + '（该值通关率 ' + (rate(sug) * 100).toFixed(1) + '%）');
-    }
-}
-
-function main() {
-    if (process.argv[3] === 'calib') {
-        calibrate(parseFloat(process.argv[4] || '0.5'), parseInt(process.argv[2] || '600', 10));
-        return;
-    }
-    const N = parseInt(process.argv[2] || '3000', 10);
-    const rng = mulberry32(20261025);
-    const all = [...NORMAL_ENEMIES, ...ELITES, BOSS];
-    console.log('=== 单人远征（每英雄 ' + N + ' 局） ===');
-    console.log('英雄        通关率  平均进度  死因分布(普通/精英/首领) | 初始牌组满血单挑：' + all.map((e) => e.id).join(' / ') +
-        ' | 每战回合 出牌');
+function report(N: number) {
+    console.log('\n=== 三人远征（每阵容 ' + N + ' 局，四区 × 6 节点 = 24） ===');
+    console.log('阵容                    通关率   平均进度   死因(普通/精英/首领)   每战回合');
+    let sum = 0;
     const rates: number[] = [];
-    for (const def of HEROES) {
-        STAT.fights = 0; STAT.rounds = 0; STAT.plays = 0;
-        let clear = 0, depth = 0;
-        const death = { n: 0, e: 0, b: 0 };
+    PARTY_NOTES.forEach((pn, pi) => {
+        const rng = mulberry32(1000 + pi);
+        let clear = 0, depth = 0, rounds = 0, fights = 0;
+        const death: { [k: string]: number } = { battle: 0, elite: 0, boss: 0 };
         for (let i = 0; i < N; i++) {
-            const r = run(def, rng);
-            if (r.cleared) { clear++; }
-            else if (STAGES.some((st) => st.boss.id === r.diedAt)) { death.b++; }
-            else if (r.diedAt === 'lich' || r.diedAt === 'troll') { death.e++; } else { death.n++; }
-            depth += r.depth;
+            const r = run(pn.ids, rng);
+            if (r.cleared) { clear++; } else { death[r.diedAt]++; }
+            depth += r.depth; rounds += r.rounds; fights += r.fights;
         }
-        const wins = STAT.fights;
-        const avgRounds = STAT.rounds / Math.max(1, wins);
-        const avgPlays = STAT.plays / Math.max(1, wins);
-        const duels = all.map((e) => pct(duel(def, e, Math.max(200, N >> 3), rng), 1).replace('%', '') + '%');
+        const name = pn.ids.map((id) => heroById(id).name).join('+');
         rates.push(clear / N);
-        console.log(def.name.padEnd(6, '　') + pct(clear, N) + '   ' + (depth / N).toFixed(2) + '/24   ' +
-            pct(death.n, N) + pct(death.e, N) + pct(death.b, N) + ' | ' + duels.join(' ') +
-            ' | ' + avgRounds.toFixed(1) + ' ' + avgPlays.toFixed(1));
-    }
-    const mean = rates.reduce((a, b) => a + b, 0) / rates.length;
-    console.log('平均通关率 ' + (mean * 100).toFixed(1) + '%，最强-最弱差距 ' +
-        ((Math.max(...rates) - Math.min(...rates)) * 100).toFixed(1) + ' 个百分点');
+        sum += clear / N;
+        console.log(name.padEnd(14, '　') + pct(clear, N) + '   ' + (depth / N).toFixed(1).padStart(5) + '/24   ' +
+            pct(death.battle, N) + pct(death.elite, N) + pct(death.boss, N) + '   ' + (rounds / Math.max(1, fights)).toFixed(1));
+    });
+    console.log('平均通关率 ' + (100 * sum / PARTY_NOTES.length).toFixed(1) + '%，最强-最弱差距 ' +
+        (100 * (Math.max(...rates) - Math.min(...rates))).toFixed(1) + ' 个百分点');
 }
 
-main();
+// ---------------- 第一阶段验收自测 ----------------
+
+function selftest() {
+    let pass = 0, fail = 0;
+    const ok = (cond: boolean, msg: string) => {
+        if (cond) { pass++; } else { fail++; console.log('  ✗ ' + msg); }
+    };
+    const rng = mulberry32(7);
+    const dummy: EnemyDef = {
+        id: 'dummy', name: '木桩', visual: 'golem', maxHp: 100000, ac: 1, atk: 0, save: -10, insight: 1,
+        gold: [0, 0], desc: '', pattern: [{ type: 'block', block: 0 }],
+    };
+    const mk = () => new BattleCore(['pei', 'shen', 'ye'].map((id) => makeHero(heroById(id))), [dummy, dummy], rng);
+    const setDice = (core: BattleCore, hi: number, vals: number[]) => {
+        core.heroes[hi].dice = vals.map((v, i) => ({ id: 900 + hi * 10 + i, owner: core.heroes[hi].inst.def.id, value: v, used: false }));
+    };
+
+    // 1. 骰子不会跨角色串用
+    {
+        const c = mk(); c.startRound();
+        setDice(c, 0, [2, 2, 2]); setDice(c, 1, [6, 6, 6]);
+        ok(c.act(0, 'guard', [c.heroes[1].dice[0].id]) === null, '裴烈不能使用沈知远的骰子');
+        ok(c.heroes[1].dice.every((d) => !d.used), '非法支付不消耗他人骰子');
+        ok(c.heroes[0].bonus === true, '非法支付不消耗行动');
+        const r = c.act(0, 'guard', [c.heroes[0].dice[0].id]);
+        ok(!!r, '使用自己的骰子成功');
+        ok(c.act(1, 'insight', [c.heroes[0].dice[1].id]) === null, '沈知远不能使用裴烈的骰子');
+        ok(c.heroes[0].dice.filter((d) => d.used).length === 1, '同一颗骰子只被消费一次');
+    }
+    // 2. 行动不会超限
+    {
+        const c = mk(); c.startRound();
+        setDice(c, 0, [5, 5, 1]);
+        ok(!!c.act(0, 'attack', [], 0), '主要行动：普通攻击');
+        ok(c.act(0, 'cleave', undefined, 0) === null, '第二次主要行动被拒绝');
+        ok(!!c.act(0, 'guard'), '附赠行动：格挡（≤3）');
+        ok(c.act(0, 'protect') === null, '第二次附赠行动被拒绝');
+        ok(!!c.move(0) && c.move(0) === null, '每回合只能移动一次');
+        setDice(c, 2, [6, 4, 3]);
+        const used = c.heroes[2].dice.filter((d) => d.used).length;
+        ok(c.act(2, 'guard') === null && c.heroes[2].dice.filter((d) => d.used).length === used, '不能使用别人的职业技能');
+    }
+    // 3. 骰槽与组合识别
+    ok(slotValid('pair', [3, 3]) && !slotValid('pair', [3, 4]), '对子识别');
+    ok(slotValid('triple', [5, 5, 5]) && !slotValid('triple', [5, 5, 4]), '三条识别');
+    ok(slotValid('straight', [4, 2, 3]) && !slotValid('straight', [1, 2, 4]), '顺子识别');
+    ok(slotValid('min4', [4]) && !slotValid('min4', [3]) && slotValid('six', [6]) && !slotValid('odd', [2]), '单骰骰槽');
+    {
+        const ds: Die[] = [{ id: 1, owner: 'a', value: 2, used: false }, { id: 2, owner: 'a', value: 2, used: true }];
+        ok(findPayment('pair', ds) === null, '已用骰子不参与组合支付');
+    }
+    // 4. 伤害结算正确（范围检查）
+    {
+        let bad = 0;
+        for (let i = 0; i < 4000; i++) {
+            const c = mk(); c.startRound();
+            const h = c.heroes[0], w = weaponById(h.inst.weapon.id);
+            const m = mod(h.inst.def.attrs.str);
+            const r = c.act(0, 'attack', [], 0);
+            const a = r.fx.find((f) => f.k === 'atk') as { hit: boolean; crit: boolean; dmg: number };
+            if (a.hit) {
+                const max = w.die * (a.crit ? 2 : 1) + m, min = Math.max(1, (a.crit ? 2 : 1) + m);
+                if (a.dmg < min || a.dmg > max) { bad++; }
+            } else if (a.dmg !== 0) { bad++; }
+        }
+        ok(bad === 0, '普通攻击伤害始终在 [骰数+修正, 骰面×骰数+修正] 内（异常 ' + bad + '）');
+        let bad2 = 0;
+        for (let i = 0; i < 2000; i++) {
+            const c = mk(); c.startRound();
+            setDice(c, 2, [6, 1, 1]);
+            const r = c.act(2, 'pierce', undefined, 0);
+            const a = r.fx.find((f) => f.k === 'atk') as { dmg: number };
+            const m = mod(17); // 叶青敏捷
+            if (a.dmg < 2 + m + 6 || a.dmg > 16 + m + 6 + 4) { bad2++; }
+        }
+        ok(bad2 === 0, '穿云箭必中且伤害 = 2×武器骰 + 修正 + X（+山林猎手 1D4）（异常 ' + bad2 + '）');
+    }
+    // 5. 状态上限与震慑免疫
+    {
+        const c = mk(); c.startRound();
+        c.addStatus('enemy', 0, 'bleed', 20, []);
+        ok(c.enemies[0].status.bleed === 10, '流血层数上限 10');
+        c.addStatus('enemy', 0, 'stun', 1, []);
+        c.endRound();
+        ok(c.enemies[0].stunImm && !c.enemies[0].status.stun, '震慑后获得免疫');
+        c.startRound();
+        setDice(c, 1, [3, 3, 1]);
+        const r = c.act(1, 'chain', undefined, 0);
+        ok(!!r && !c.enemies[0].status.stun, '免疫期间无法再次震慑');
+    }
+    // 6. 回合结束清空未用骰子，下一回合重新掷骰
+    {
+        const c = mk(); c.startRound();
+        const ids = c.heroes[0].dice.map((d) => d.id);
+        c.endRound();
+        ok(c.heroes[0].dice.every((d) => d.used), '回合结束未用骰子作废');
+        c.startRound();
+        ok(c.heroes[0].dice.length === 3 && c.heroes[0].dice.every((d) => ids.indexOf(d.id) < 0 && !d.used), '新回合重新掷 3D6');
+    }
+    console.log('\n=== 第一阶段验收自测：通过 ' + pass + ' / ' + (pass + fail) + (fail ? '，失败 ' + fail : '') + ' ===');
+}
+
+const N = Number(process.argv[2]) || 1000;
+const mode = process.argv[3] || 'report';
+if (mode === 'selftest') { selftest(); } else { selftest(); report(N); }
